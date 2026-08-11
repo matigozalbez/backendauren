@@ -13,8 +13,9 @@ func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	origenesPermitidos := []string{
 		"http://localhost:5173",
 		"https://choferesunidos.com.ar",
-		"https://www.choferesunidos.com.ar",
+		"https://choferesunidos.com.ar",
 		"http://localhost:5174",
+		"https://appauren-alpha.vercel.app", // Sin la barra / al final
 	}
 
 	permitido := false
