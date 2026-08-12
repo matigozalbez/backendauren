@@ -59,6 +59,11 @@ func main() {
 		handlers.VerificarVinculacion(firebase.Client, firebase.AuthClient)(w, r)
 	})
 
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("pong"))
+	})
+
 	log.Println("servidor corriendo en :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatal(err)
