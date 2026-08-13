@@ -3,8 +3,10 @@ package main
 import (
 	"aurenbackend/firebase"
 	"aurenbackend/handlers"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 const adminSecret = "hola"
@@ -69,8 +71,12 @@ func main() {
 	})
 	http.HandleFunc("/api/ping", pingHandler)
 
-	log.Println("servidor corriendo en :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatal(err)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
+
+	fmt.Println("Servidor corriendo en el puerto " + port)
+
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
