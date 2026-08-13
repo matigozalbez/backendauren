@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 )
@@ -9,10 +10,10 @@ var vercelPreviewRegex = regexp.MustCompile(`^https://choferesunidos-[a-zA-Z0-9\
 
 func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	origen := r.Header.Get("Origin")
+	fmt.Println("ORIGEN RECIBIDO:", "["+origen+"]")
 
 	origenesPermitidos := []string{
 		"http://localhost:5173",
-		"https://choferesunidos.com.ar",
 		"https://choferesunidos.com.ar",
 		"http://localhost:5174",
 		"https://appauren-alpha.vercel.app", // Sin la barra / al final
