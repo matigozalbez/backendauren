@@ -3,27 +3,37 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 )
+
+var vercelPreviewRegex = regexp.MustCompile(`^https://choferesunidos-[a-zA-Z0-9\-]+-matiasgozalbez\.vercel\.app$`)
 
 func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	origen := r.Header.Get("Origin")
 	fmt.Println("ORIGEN RECIBIDO:", "["+origen+"]")
 
-	// Si el navegador manda un origen, se lo devolvemos tal cual para abrir las puertas a todo.
-	// Si no manda origen (como Postman o curl), mandamos comodín.
-	if origen != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origen)
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-	} else {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+	origenesPermitidos := []string{
+		"http://localhost:5173",
+		"https://choferesunidos.com.ar",
+		"http://localhost:5174",
+		"https://appauren-alpha.vercel.app", // Sin la barra / al final
 	}
 
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Secret")
+	permitido := false
+	for _, o := range origenesPermitidos {
+		if origen == o {
+			permitido = true
+			break
+		}
+	}
 
-	// Si es una petición OPTIONS (preflight), cortamos acá con 200 OK
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
+	if !permitido && vercelPreviewRegex.MatchString(origen) {
+		permitido = true
+	}
+
+	if permitido {
+		w.Header().Set("Access-Control-Allow-Origin", origen)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Secret")
 	}
 }
