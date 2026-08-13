@@ -15,10 +15,12 @@ import (
 )
 
 type SocioInput struct {
-	DNI    string   `json:"dni"`
-	Nombre string   `json:"nombre"`
-	Planes []string `json:"planes"`
-	Estado string   `json:"estado"`
+	DNI      string   `json:"dni"`
+	Nombre   string   `json:"nombre"`
+	Apellido string   `json:"apellido"`
+	Email    string   `json:"email"`
+	Planes   []string `json:"planes"`
+	Estado   string   `json:"estado"`
 }
 
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
@@ -48,8 +50,12 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		if input.DNI == "" || input.Nombre == "" {
+		if input.DNI == "" || input.Nombre == "" || input.Apellido == "" {
 			http.Error(w, "faltan datos", http.StatusBadRequest)
+			return
+		}
+		if len(input.Planes) > 4 {
+			http.Error(w, "máximo 4 planes por socio", http.StatusBadRequest)
 			return
 		}
 		if input.Estado == "" {
@@ -58,11 +64,13 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 		_, err := fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
-			"dni":    input.DNI,
-			"nombre": input.Nombre,
-			"planes": input.Planes,
-			"estado": input.Estado,
-			"uid":    nil,
+			"dni":      input.DNI,
+			"nombre":   input.Nombre,
+			"apellido": input.Apellido,
+			"email":    input.Email,
+			"planes":   input.Planes,
+			"estado":   input.Estado,
+			"uid":      nil,
 		})
 		if err != nil {
 			http.Error(w, "error guardando socio", http.StatusInternalServerError)
