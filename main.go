@@ -41,6 +41,15 @@ func main() {
 		handlers.VincularSocio(firebase.Client, firebase.AuthClient)(w, r)
 	})
 
+	mux.HandleFunc("/api/mi-socio", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.MiSocio(firebase.Client, firebase.AuthClient)(w, r)
+	})
+
 	mux.HandleFunc("/api/crear-usuario", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {

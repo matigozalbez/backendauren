@@ -134,3 +134,25 @@ func VerificarVinculacion(fsClient *firestore.Client, authClient *auth.Client) h
 		json.NewEncoder(w).Encode(map[string]bool{"vinculado": vinculado})
 	}
 }
+
+func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		uid, err := verifyIDToken(r, authClient)
+		if err != nil {
+			http.Error(w, "no autorizado", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.Background()
+		iter := fsClient.Collection("socios").Where("uid", "==", uid).Limit(1).Documents(ctx)
+		docs, err := iter.GetAll()
+		if err != nil || len(docs) == 0 {
+			http.Error(w, "socio no encontrado", http.StatusNotFound)
+			return
+		}
+
+		data := docs[0].Data()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(data)
+	}
+}
