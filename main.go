@@ -69,6 +69,16 @@ func main() {
 		}
 		handlers.VerificarVinculacion(firebase.Client, firebase.AuthClient)(w, r)
 	})
+
+	mux.HandleFunc("/api/medicamentos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.Medicamentos(w, r) // antes decía handlers.Medicamento — con "s" al final
+	})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")
