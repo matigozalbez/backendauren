@@ -7,13 +7,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
-const adminSecret = "hola"
+var adminSecretEnv = "adminkey" // Variable global que inicializamos al arrancar
 
 func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Admin-Secret") != adminSecret {
+		if r.Header.Get("X-Admin-Secret") != adminSecretEnv {
 			http.Error(w, "no autorizado", http.StatusUnauthorized)
 			return
 		}
@@ -22,6 +24,19 @@ func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("Aviso: No se encontro el archivo env")
+	}
+
+	handlers.RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
+
+	if val := os.Getenv("ADMIN_SECRET_KEY"); val != "" {
+		adminSecretEnv = val
+	} else {
+		log.Println("Aviso: ADMIN_SECRET_KEY no está configurada, usando default")
+	}
+
 	firebase.Init()
 	mux := http.NewServeMux()
 	handlers.FirestoreClient = firebase.Client

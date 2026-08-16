@@ -23,7 +23,7 @@ var (
 	AuthClient      *firebaseauth.Client
 )
 
-const RESEND_API_KEY = "re_f7XniE9j_16EqXm1wPuQBq4iZ7SBzGJi1"
+var RESEND_API_KEY string
 
 // son estructuras =>
 
@@ -42,8 +42,6 @@ type CodigoVerificacion struct {
 	Intentos   int       `firestore:"intentos"`
 	Verificado bool      `firestore:"verificado"`
 }
-
-// Generan el codigo
 
 func generarCodigo() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(999999))
