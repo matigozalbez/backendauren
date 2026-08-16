@@ -24,6 +24,8 @@ func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 func main() {
 	firebase.Init()
 	mux := http.NewServeMux()
+	handlers.FirestoreClient = firebase.Client
+	handlers.AuthClient = firebase.AuthClient
 
 	mux.HandleFunc("/api/admin/socios", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -77,6 +79,33 @@ func main() {
 			return
 		}
 		handlers.Medicamentos(w, r) // antes decía handlers.Medicamento — con "s" al final
+	})
+
+	mux.HandleFunc("/api/afiliados/solicitar-codigo", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.SolicitarCodigo(w, r) // antes decía handlers.Medicamento — con "s" al final
+	})
+
+	mux.HandleFunc("/api/afiliados/verificar-codigo", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.VerificarCodigo(w, r) // antes decía handlers.Medicamento — con "s" al final
+	})
+
+	mux.HandleFunc("/api/afiliados/crear-password", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CrearPassword(w, r) // antes decía handlers.Medicamento — con "s" al final
 	})
 
 	http.HandleFunc("/api/ping", pingHandler)

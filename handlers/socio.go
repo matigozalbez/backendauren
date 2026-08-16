@@ -11,16 +11,32 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
-	// ajustá el nombre del módulo si es distinto
 )
 
+type AdherenteInput struct {
+	Relacion string `json:"relacion"`
+	Nombre   string `json:"nombre"`
+	Apellido string `json:"apellido"`
+	DNI      string `json:"dni"`
+	Edad     string `json:"edad"`
+}
+
 type SocioInput struct {
-	DNI      string   `json:"dni"`
-	Nombre   string   `json:"nombre"`
-	Apellido string   `json:"apellido"`
-	Email    string   `json:"email"`
-	Planes   []string `json:"planes"`
-	Estado   string   `json:"estado"`
+	DNI                   string           `json:"dni"`
+	Nombre                string           `json:"nombre"`
+	Apellido              string           `json:"apellido"`
+	Email                 string           `json:"email"`
+	Edad                  string           `json:"edad"`
+	Provincia             string           `json:"provincia"`
+	Ciudad                string           `json:"ciudad"`
+	Direccion             string           `json:"direccion"`
+	MetodoPago            string           `json:"metodoPago"`
+	CBU                   string           `json:"cbu"`
+	TarjetaUltimosDigitos string           `json:"tarjetaUltimosDigitos"` // solo los últimos 4, nunca el número completo
+	TarjetaVencimiento    string           `json:"tarjetaVencimiento"`
+	Planes                []string         `json:"planes"`
+	Estado                string           `json:"estado"`
+	Adherentes            []AdherenteInput `json:"adherentes"`
 }
 
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
@@ -58,19 +74,45 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			http.Error(w, "máximo 4 planes por socio", http.StatusBadRequest)
 			return
 		}
+		if len(input.Adherentes) > 10 {
+			http.Error(w, "máximo 10 adherentes por titular", http.StatusBadRequest)
+			return
+		}
 		if input.Estado == "" {
 			input.Estado = "activo"
 		}
 
+		// Convertimos adherentes a []interface{} para que Firestore lo
+		// guarde como array de mapas
+		adherentesData := make([]interface{}, 0, len(input.Adherentes))
+		for _, a := range input.Adherentes {
+			adherentesData = append(adherentesData, map[string]interface{}{
+				"relacion": a.Relacion,
+				"nombre":   a.Nombre,
+				"apellido": a.Apellido,
+				"dni":      a.DNI,
+				"edad":     a.Edad,
+			})
+		}
+
 		ctx := context.Background()
 		_, err := fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
-			"dni":      input.DNI,
-			"nombre":   input.Nombre,
-			"apellido": input.Apellido,
-			"email":    input.Email,
-			"planes":   input.Planes,
-			"estado":   input.Estado,
-			"uid":      nil,
+			"dni":                   input.DNI,
+			"nombre":                input.Nombre,
+			"apellido":              input.Apellido,
+			"email":                 input.Email,
+			"edad":                  input.Edad,
+			"provincia":             input.Provincia,
+			"ciudad":                input.Ciudad,
+			"direccion":             input.Direccion,
+			"metodoPago":            input.MetodoPago,
+			"cbu":                   input.CBU,
+			"tarjetaUltimosDigitos": input.TarjetaUltimosDigitos,
+			"tarjetaVencimiento":    input.TarjetaVencimiento,
+			"planes":                input.Planes,
+			"estado":                input.Estado,
+			"adherentes":            adherentesData,
+			"uid":                   nil,
 		})
 		if err != nil {
 			http.Error(w, "error guardando socio", http.StatusInternalServerError)
@@ -106,6 +148,19 @@ func VincularSocio(fsClient *firestore.Client, authClient *auth.Client) http.Han
 		data := doc.Data()
 		if data["uid"] != nil {
 			http.Error(w, "este DNI ya tiene una cuenta vinculada", http.StatusConflict)
+			return
+		}
+
+		mailRegistrado, _ := data["email"].(string)
+
+		usuarioAuth, err := authClient.GetUser(ctx, uid)
+		if err != nil {
+			http.Error(w, "error verificando cuenta", http.StatusInternalServerError)
+			return
+		}
+
+		if !strings.EqualFold(strings.TrimSpace(usuarioAuth.Email), strings.TrimSpace(mailRegistrado)) {
+			http.Error(w, "el mail de tu cuenta no coincide con el registrado para este DNI", http.StatusForbidden)
 			return
 		}
 
