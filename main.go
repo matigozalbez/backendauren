@@ -11,7 +11,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var adminSecretEnv = "adminkey" // Variable global que inicializamos al arrancar
+var adminSecretEnv = "adminkey"
 
 func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +111,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.VerificarCodigo(w, r) // antes decía handlers.Medicamento — con "s" al final
+		handlers.VerificarCodigo(w, r)
 	})
 
 	mux.HandleFunc("/api/afiliados/crear-password", func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.CrearPassword(w, r) // antes decía handlers.Medicamento — con "s" al final
+		handlers.CrearPassword(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/notificaciones", func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,17 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+		// Acá ya le pasas el firebase.Client y firebase.MessagingClient de tu init global
 		requireAdmin(handlers.CrearNotificacion(firebase.Client, firebase.MessagingClient))(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/listar-socios", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ListarSocios(firebase.Client))(w, r)
 	})
 
 	http.HandleFunc("/api/ping", pingHandler)

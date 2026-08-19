@@ -219,3 +219,29 @@ func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFu
 		json.NewEncoder(w).Encode(data)
 	}
 }
+
+func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		iter := fsClient.Collection("socios").Documents(ctx)
+		docs, err := iter.GetAll()
+		if err != nil {
+			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
+			return
+		}
+
+		var socios []map[string]interface{}
+		for _, doc := range docs {
+			data := doc.Data()
+			// Podés mandar el DNI como id si el documento es el DNI
+			socios = append(socios, map[string]interface{}{
+				"id":     doc.Ref.ID, // o data["dni"]
+				"nombre": data["nombre"],
+				"email":  data["email"],
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(socios)
+	}
+}
