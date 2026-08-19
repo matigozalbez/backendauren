@@ -7,11 +7,13 @@ import (
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
+	"firebase.google.com/go/v4/messaging"
 	"google.golang.org/api/option"
 )
 
 var Client *firestore.Client
 var AuthClient *auth.Client
+var MessagingClient *messaging.Client
 
 func Init() {
 	ctx := context.Background()
@@ -32,4 +34,10 @@ func Init() {
 		log.Fatalf("error conectando auth: %v", err)
 	}
 	AuthClient = authClient
+
+	messagingClient, err := app.Messaging(ctx)
+	if err != nil {
+		log.Fatalf("error conectando messaging: %v", err)
+	}
+	MessagingClient = messagingClient
 }

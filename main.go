@@ -123,6 +123,15 @@ func main() {
 		handlers.CrearPassword(w, r) // antes decía handlers.Medicamento — con "s" al final
 	})
 
+	mux.HandleFunc("/api/admin/notificaciones", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.CrearNotificacion(firebase.Client, firebase.MessagingClient))(w, r)
+	})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")
