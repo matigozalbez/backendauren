@@ -233,11 +233,12 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 		var socios []map[string]interface{}
 		for _, doc := range docs {
 			data := doc.Data()
-			// Podés mandar el DNI como id si el documento es el DNI
 			socios = append(socios, map[string]interface{}{
-				"id":     doc.Ref.ID, // o data["dni"]
+				"id":     doc.Ref.ID,
 				"nombre": data["nombre"],
 				"email":  data["email"],
+				"dni":    data["dni"],    // <-- ¡Agregado!
+				"planes": data["planes"], // <-- ¡Agregado!
 			})
 		}
 
