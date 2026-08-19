@@ -67,10 +67,7 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 			for _, token := range tokens {
 				message := &messaging.Message{
 					Token: token,
-					Notification: &messaging.Notification{
-						Title: req.Titulo,
-						Body:  req.Mensaje,
-					},
+
 					Webpush: &messaging.WebpushConfig{
 						Notification: &messaging.WebpushNotification{
 							Title: req.Titulo,
