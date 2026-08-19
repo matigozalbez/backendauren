@@ -35,6 +35,7 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 
 		ctx := context.Background()
 
+		// 1. Guardar la notificación en Firestore
 		_, _, err := fsClient.Collection("notificaciones").Add(ctx, map[string]interface{}{
 			"titulo":  req.Titulo,
 			"mensaje": req.Mensaje,
@@ -46,6 +47,7 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 			return
 		}
 
+		// 2. Obtener los tokens de la colección push_tokens
 		tokensSnap, err := fsClient.Collection("push_tokens").Documents(ctx).GetAll()
 		if err != nil {
 			log.Printf("error obteniendo tokens: %v", err)
@@ -61,20 +63,31 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 
 		pushEnviados := 0
 		if len(tokens) > 0 && msgClient != nil {
-			message := &messaging.MulticastMessage{
-				Tokens: tokens,
-				Notification: &messaging.Notification{
-					Title: req.Titulo,
-					Body:  req.Mensaje,
-				},
+			// Enviamos uno por uno para asegurar que el formato Webpush llegue limpio a las PWA
+			for _, token := range tokens {
+				message := &messaging.Message{
+					Token: token,
+					Notification: &messaging.Notification{
+						Title: req.Titulo,
+						Body:  req.Mensaje,
+					},
+					Webpush: &messaging.WebpushConfig{
+						Notification: &messaging.WebpushNotification{
+							Title: req.Titulo,
+							Body:  req.Mensaje,
+							Icon:  "/icon-192.png",
+						},
+					},
+				}
+
+				_, err := msgClient.Send(ctx, message)
+				if err != nil {
+					log.Printf("error enviando push a token: %v", err)
+				} else {
+					pushEnviados++
+				}
 			}
-			resp, err := msgClient.SendEachForMulticast(ctx, message)
-			if err != nil {
-				log.Printf("error enviando push: %v", err)
-			} else {
-				pushEnviados = resp.SuccessCount
-				log.Printf("push enviado: %d éxito, %d fallos", resp.SuccessCount, resp.FailureCount)
-			}
+			log.Printf("push enviados con éxito: %d de %d", pushEnviados, len(tokens))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
