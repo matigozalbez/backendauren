@@ -63,40 +63,58 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 		}
 
 		// 2. Obtener los tokens según el tipo de envío
-		tokensQuery := fsClient.Collection("push_tokens").Query
+		var tokens []string
 
 		switch req.Tipo {
 		case "general":
-			// Trae todos los tokens
-			break
+			tokensSnap, err := fsClient.Collection("push_tokens").Documents(ctx).GetAll()
+			if err != nil {
+				log.Printf("error consultando tokens generales: %v", err)
+			} else {
+				for _, doc := range tokensSnap {
+					data := doc.Data()
+					if t, ok := data["token"].(string); ok && t != "" {
+						tokens = append(tokens, t)
+					}
+				}
+			}
+
 		case "usuario":
 			if req.UserID == "" {
 				http.Error(w, "user_id es requerido para notificaciones de usuario", http.StatusBadRequest)
 				return
 			}
-			tokensQuery = tokensQuery.Where("user_id", "==", req.UserID)
+			// Buscamos directo el documento por el ID (que es el UID en Firebase)
+			docSnap, err := fsClient.Collection("push_tokens").Doc(req.UserID).Get(ctx)
+			if err == nil && docSnap.Exists() {
+				data := docSnap.Data()
+				if t, ok := data["token"].(string); ok && t != "" {
+					tokens = append(tokens, t)
+				}
+			} else {
+				log.Printf("no se encontró token para el usuario %s: %v", req.UserID, err)
+			}
+
 		case "plan":
 			if req.Plan == "" {
 				http.Error(w, "plan es requerido para notificaciones por plan", http.StatusBadRequest)
 				return
 			}
-			tokensQuery = tokensQuery.Where("plan", "==", req.Plan)
+			tokensSnap, err := fsClient.Collection("push_tokens").Where("plan", "==", req.Plan).Documents(ctx).GetAll()
+			if err != nil {
+				log.Printf("error consultando tokens por plan: %v", err)
+			} else {
+				for _, doc := range tokensSnap {
+					data := doc.Data()
+					if t, ok := data["token"].(string); ok && t != "" {
+						tokens = append(tokens, t)
+					}
+				}
+			}
+
 		default:
 			http.Error(w, "tipo de notificación inválido", http.StatusBadRequest)
 			return
-		}
-
-		tokensSnap, err := tokensQuery.Documents(ctx).GetAll()
-		if err != nil {
-			log.Printf("error consultando tokens: %v", err)
-		}
-
-		var tokens []string
-		for _, doc := range tokensSnap {
-			data := doc.Data()
-			if t, ok := data["token"].(string); ok && t != "" {
-				tokens = append(tokens, t)
-			}
 		}
 
 		// 3. Disparar los Web Push a los tokens filtrados
