@@ -235,10 +235,11 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 			data := doc.Data()
 			socios = append(socios, map[string]interface{}{
 				"id":     doc.Ref.ID,
+				"uid":    data["uid"], // <--- ¡Acá está la clave! Mapeamos el uid real de Firestore
 				"nombre": data["nombre"],
 				"email":  data["email"],
-				"dni":    data["dni"],    // <-- ¡Agregado!
-				"planes": data["planes"], // <-- ¡Agregado!
+				"dni":    data["dni"],
+				"planes": data["planes"],
 			})
 		}
 

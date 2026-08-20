@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -84,15 +85,25 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 				http.Error(w, "user_id es requerido para notificaciones de usuario", http.StatusBadRequest)
 				return
 			}
-			// Buscamos directo el documento por el ID (que es el UID en Firebase)
+			fmt.Println("--- BUSCANDO USUARIO --- ID:", req.UserID)
+
 			docSnap, err := fsClient.Collection("push_tokens").Doc(req.UserID).Get(ctx)
+			if err != nil {
+				fmt.Println("Error buscando doc en Firestore:", err)
+			}
+
 			if err == nil && docSnap.Exists() {
 				data := docSnap.Data()
+				fmt.Println("¡Doc encontrado! Datos:", data)
+
 				if t, ok := data["token"].(string); ok && t != "" {
+					fmt.Println("Token extraído OK:", t)
 					tokens = append(tokens, t)
+				} else {
+					fmt.Println("El campo 'token' no existe o no es string. Data:", data)
 				}
 			} else {
-				log.Printf("no se encontró token para el usuario %s: %v", req.UserID, err)
+				fmt.Println("El documento NO existe para el ID:", req.UserID)
 			}
 
 		case "plan":
@@ -100,14 +111,22 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 				http.Error(w, "plan es requerido para notificaciones por plan", http.StatusBadRequest)
 				return
 			}
-			tokensSnap, err := fsClient.Collection("push_tokens").Where("plan", "==", req.Plan).Documents(ctx).GetAll()
+			fmt.Println("--- BUSCANDO POR PLAN --- Plan solicitado:", req.Plan)
+
+			tokensSnap, err := fsClient.Collection("push_tokens").Where("planes", "array-contains", req.Plan).Documents(ctx).GetAll()
 			if err != nil {
-				log.Printf("error consultando tokens por plan: %v", err)
+				fmt.Println("Error consultando tokens por plan en Firestore:", err)
 			} else {
+				fmt.Printf("Documentos encontrados con el plan '%s': %d\n", req.Plan, len(tokensSnap))
 				for _, doc := range tokensSnap {
 					data := doc.Data()
+					fmt.Println("Revisando doc ID:", doc.Ref.ID, "-> Data:", data)
+
 					if t, ok := data["token"].(string); ok && t != "" {
+						fmt.Println("Token extraído OK para plan:", t)
 						tokens = append(tokens, t)
+					} else {
+						fmt.Println("El campo 'token' no existe o no es string en este doc de plan. Data:", data)
 					}
 				}
 			}
