@@ -142,6 +142,15 @@ func main() {
 		requireAdmin(handlers.ListarSocios(firebase.Client))(w, r)
 	})
 
+	mux.HandleFunc("/api/notificaciones", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.ObtenerNotificaciones(firebase.Client)(w, r)
+	})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")

@@ -109,7 +109,9 @@ func getString(value interface{}) string {
 	if value == nil {
 		return ""
 	}
+
 	return fmt.Sprint(value)
+
 }
 
 func getFloat(value interface{}) float64 {
