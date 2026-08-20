@@ -160,7 +160,7 @@ func main() {
 		requireAdmin(handlers.CrearOActualizarCatalogoPlan(firebase.Client))(w, r)
 	})
 
-	mux.HandleFunc("/api/admin/catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/obtener-planes", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
