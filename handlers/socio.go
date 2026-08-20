@@ -22,21 +22,22 @@ type AdherenteInput struct {
 }
 
 type SocioInput struct {
-	DNI                   string           `json:"dni"`
-	Nombre                string           `json:"nombre"`
-	Apellido              string           `json:"apellido"`
-	Email                 string           `json:"email"`
-	Edad                  string           `json:"edad"`
-	Provincia             string           `json:"provincia"`
-	Ciudad                string           `json:"ciudad"`
-	Direccion             string           `json:"direccion"`
-	MetodoPago            string           `json:"metodoPago"`
-	CBU                   string           `json:"cbu"`
-	TarjetaUltimosDigitos string           `json:"tarjetaUltimosDigitos"` // solo los últimos 4, nunca el número completo
-	TarjetaVencimiento    string           `json:"tarjetaVencimiento"`
-	Planes                []string         `json:"planes"`
-	Estado                string           `json:"estado"`
-	Adherentes            []AdherenteInput `json:"adherentes"`
+	DNI                   string                      `json:"dni"`
+	Nombre                string                      `json:"nombre"`
+	Apellido              string                      `json:"apellido"`
+	Email                 string                      `json:"email"`
+	Edad                  string                      `json:"edad"`
+	Provincia             string                      `json:"provincia"`
+	Ciudad                string                      `json:"ciudad"`
+	Direccion             string                      `json:"direccion"`
+	MetodoPago            string                      `json:"metodoPago"`
+	CBU                   string                      `json:"cbu"`
+	TarjetaUltimosDigitos string                      `json:"tarjetaUltimosDigitos"` // solo los últimos 4, nunca el número completo
+	TarjetaVencimiento    string                      `json:"tarjetaVencimiento"`
+	Planes                []string                    `json:"planes"`
+	Estado                string                      `json:"estado"`
+	Adherentes            []AdherenteInput            `json:"adherentes"`
+	Beneficios            []ActualizarBeneficiosInput `json:"beneficios"`
 }
 
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
@@ -234,12 +235,16 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 		for _, doc := range docs {
 			data := doc.Data()
 			socios = append(socios, map[string]interface{}{
-				"id":     doc.Ref.ID,
-				"uid":    data["uid"], // <--- ¡Acá está la clave! Mapeamos el uid real de Firestore
-				"nombre": data["nombre"],
-				"email":  data["email"],
-				"dni":    data["dni"],
-				"planes": data["planes"],
+				"id":         doc.Ref.ID,
+				"uid":        data["uid"],
+				"nombre":     data["nombre"],
+				"apellido":   data["apellido"],
+				"email":      data["email"],
+				"dni":        data["dni"],
+				"planes":     data["planes"],
+				"estado":     data["estado"],
+				"adherentes": data["adherentes"],
+				"beneficios": data["beneficios"],
 			})
 		}
 
