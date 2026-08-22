@@ -3,6 +3,7 @@ package main
 import (
 	"aurenbackend/firebase"
 	"aurenbackend/handlers"
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -41,6 +42,22 @@ func main() {
 	mux := http.NewServeMux()
 	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
+
+	err := firebase.DarAdmin("matiasgozalbez@gmail.com")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	user, err := firebase.AuthClient.GetUserByEmail(
+		context.Background(),
+		"matiasgozalbez@gmail.com",
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("UID: %s", user.UID)
+	log.Printf("CLAIMS: %+v", user.CustomClaims)
 
 	mux.HandleFunc("/api/admin/socios", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -176,6 +193,46 @@ func main() {
 			return
 		}
 		requireAdmin(handlers.ActualizarBeneficiosSocio(firebase.Client))(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/listar-catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ListarCatalogoPlanes(firebase.Client))(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/actualizar-socio/", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ActualizarEstadoSocio(firebase.Client))(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/actualizar-estadoplan/", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ActualizarEstadoPlan(firebase.Client))(w, r)
+	})
+
+	mux.HandleFunc("/api/planes/detalle", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("🔥 ENTRO A /api/planes/detalle")
+
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		handlers.ObtenerCatalogoPlan(firebase.Client)(w, r)
 	})
 
 	http.HandleFunc("/api/ping", pingHandler)

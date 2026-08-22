@@ -8,9 +8,15 @@ import (
 	"cloud.google.com/go/firestore"
 )
 
+type BeneficioInput struct {
+	Clave         string   `json:"clave"`
+	Titulo        string   `json:"titulo"`
+	Descripciones []string `json:"descripciones"`
+}
+
 type CatalogoPlanInput struct {
-	Nombre     string         `json:"nombre"`
-	Beneficios map[string]int `json:"beneficios"`
+	Nombre     string           `json:"nombre"`
+	Beneficios []BeneficioInput `json:"beneficios"`
 }
 
 func CrearOActualizarCatalogoPlan(fsClient *firestore.Client) http.HandlerFunc {
@@ -31,10 +37,19 @@ func CrearOActualizarCatalogoPlan(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
+		beneficiosData := make([]interface{}, 0, len(input.Beneficios))
+		for _, b := range input.Beneficios {
+			beneficiosData = append(beneficiosData, map[string]interface{}{
+				"clave":         b.Clave,
+				"titulo":        b.Titulo,
+				"descripciones": b.Descripciones,
+			})
+		}
+
 		ctx := context.Background()
 		_, err := fsClient.Collection("catalogo_planes").Doc(input.Nombre).Set(ctx, map[string]interface{}{
 			"nombre":     input.Nombre,
-			"beneficios": input.Beneficios,
+			"beneficios": beneficiosData,
 		})
 		if err != nil {
 			http.Error(w, "error guardando catálogo de plan", http.StatusInternalServerError)
@@ -57,10 +72,29 @@ func ObtenerCatalogoPlan(fsClient *firestore.Client) http.HandlerFunc {
 		docSnap, err := fsClient.Collection("catalogo_planes").Doc(nombre).Get(ctx)
 		if err != nil || !docSnap.Exists() {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"beneficios": map[string]int{}})
+			json.NewEncoder(w).Encode(map[string]interface{}{"beneficios": []interface{}{}})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(docSnap.Data())
+	}
+}
+
+func ListarCatalogoPlanes(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		docs, err := fsClient.Collection("catalogo_planes").Documents(ctx).GetAll()
+		if err != nil {
+			http.Error(w, "error obteniendo catálogo", http.StatusInternalServerError)
+			return
+		}
+
+		var planes []map[string]interface{}
+		for _, doc := range docs {
+			planes = append(planes, doc.Data())
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(planes)
 	}
 }

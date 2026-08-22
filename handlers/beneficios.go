@@ -9,8 +9,8 @@ import (
 )
 
 type ActualizarBeneficiosInput struct {
-	Plan       string         `json:"plan"`
-	Beneficios map[string]int `json:"beneficios"`
+	Plan       string   `json:"plan"`
+	Beneficios []string `json:"beneficios"`
 }
 
 func ActualizarBeneficiosSocio(fsClient *firestore.Client) http.HandlerFunc {

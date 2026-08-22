@@ -21,23 +21,27 @@ type AdherenteInput struct {
 	Edad     string `json:"edad"`
 }
 
+type PlanSocio struct {
+	Nombre string `json:"nombre"`
+	Estado string `json:"estado"` // "activo", "inactivo", etc.
+}
+
 type SocioInput struct {
-	DNI                   string                      `json:"dni"`
-	Nombre                string                      `json:"nombre"`
-	Apellido              string                      `json:"apellido"`
-	Email                 string                      `json:"email"`
-	Edad                  string                      `json:"edad"`
-	Provincia             string                      `json:"provincia"`
-	Ciudad                string                      `json:"ciudad"`
-	Direccion             string                      `json:"direccion"`
-	MetodoPago            string                      `json:"metodoPago"`
-	CBU                   string                      `json:"cbu"`
-	TarjetaUltimosDigitos string                      `json:"tarjetaUltimosDigitos"` // solo los últimos 4, nunca el número completo
-	TarjetaVencimiento    string                      `json:"tarjetaVencimiento"`
-	Planes                []string                    `json:"planes"`
-	Estado                string                      `json:"estado"`
-	Adherentes            []AdherenteInput            `json:"adherentes"`
-	Beneficios            []ActualizarBeneficiosInput `json:"beneficios"`
+	DNI                   string           `json:"dni"`
+	Nombre                string           `json:"nombre"`
+	Apellido              string           `json:"apellido"`
+	Email                 string           `json:"email"`
+	Edad                  string           `json:"edad"`
+	Provincia             string           `json:"provincia"`
+	Ciudad                string           `json:"ciudad"`
+	Direccion             string           `json:"direccion"`
+	MetodoPago            string           `json:"metodoPago"`
+	CBU                   string           `json:"cbu"`
+	TarjetaUltimosDigitos string           `json:"tarjetaUltimosDigitos"` // solo los últimos 4, nunca el número completo
+	TarjetaVencimiento    string           `json:"tarjetaVencimiento"`
+	Planes                []PlanSocio      `json:"planes"`
+	Estado                string           `json:"estado"`
+	Adherentes            []AdherenteInput `json:"adherentes"`
 }
 
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
@@ -96,6 +100,18 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			})
 		}
 
+		planesData := make([]interface{}, 0, len(input.Planes))
+		for _, p := range input.Planes {
+			estadoPlan := p.Estado
+			if estadoPlan == "" {
+				estadoPlan = "activo" // Por defecto activo si no se envía
+			}
+			planesData = append(planesData, map[string]interface{}{
+				"nombre": p.Nombre,
+				"estado": estadoPlan,
+			})
+		}
+
 		ctx := context.Background()
 		_, err := fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
 			"dni":                   input.DNI,
@@ -110,7 +126,7 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			"cbu":                   input.CBU,
 			"tarjetaUltimosDigitos": input.TarjetaUltimosDigitos,
 			"tarjetaVencimiento":    input.TarjetaVencimiento,
-			"planes":                input.Planes,
+			"planes":                planesData,
 			"estado":                input.Estado,
 			"adherentes":            adherentesData,
 			"uid":                   nil,
@@ -244,11 +260,157 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 				"planes":     data["planes"],
 				"estado":     data["estado"],
 				"adherentes": data["adherentes"],
-				"beneficios": data["beneficios"],
 			})
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(socios)
+	}
+}
+
+func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodPut {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Estructura específica para este endpoint
+		var input struct {
+			ID         string                   `json:"id"`
+			Estado     string                   `json:"estado"`
+			Adherentes []map[string]interface{} `json:"adherentes"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+
+		if input.ID == "" {
+			http.Error(w, "falta el ID del socio", http.StatusBadRequest)
+			return
+		}
+
+		if input.Estado == "" {
+			input.Estado = "activo"
+		}
+
+		ctx := context.Background()
+
+		// Preparamos los campos a actualizar en Firestore
+		updates := []firestore.Update{
+			{Path: "estado", Value: input.Estado},
+		}
+
+		// Si mandaste adherentes actualizados, los incluimos también
+		if input.Adherentes != nil {
+			updates = append(updates, firestore.Update{Path: "adherentes", Value: input.Adherentes})
+		}
+
+		_, err := fsClient.Collection("socios").Doc(input.ID).Update(ctx, updates)
+		if err != nil {
+			http.Error(w, "error al actualizar en firestore: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut && r.Method != http.MethodPost {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extraer ID desde la URL
+		partes := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(partes) < 4 {
+			http.Error(w, "ID de socio inválido", http.StatusBadRequest)
+			return
+		}
+
+		socioID := partes[len(partes)-1]
+
+		var input struct {
+			Plan   string `json:"plan"`
+			Estado string `json:"estado"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, "JSON inválido: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if input.Plan == "" {
+			http.Error(w, "falta el plan", http.StatusBadRequest)
+			return
+		}
+
+		if input.Estado == "" {
+			http.Error(w, "falta el estado", http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.Background()
+
+		ref := fsClient.Collection("socios").Doc(socioID)
+
+		doc, err := ref.Get(ctx)
+		if err != nil || !doc.Exists() {
+			http.Error(w, "socio no encontrado", http.StatusNotFound)
+			return
+		}
+
+		data := doc.Data()
+
+		planesRaw, ok := data["planes"].([]interface{})
+		if !ok {
+			http.Error(w, "el socio no tiene planes válidos", http.StatusInternalServerError)
+			return
+		}
+
+		encontrado := false
+
+		for i, planRaw := range planesRaw {
+			plan, ok := planRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			nombre, _ := plan["nombre"].(string)
+
+			if nombre == input.Plan {
+				plan["estado"] = input.Estado
+				planesRaw[i] = plan
+				encontrado = true
+				break
+			}
+		}
+
+		if !encontrado {
+			http.Error(w, "plan no encontrado", http.StatusNotFound)
+			return
+		}
+
+		_, err = ref.Update(ctx, []firestore.Update{
+			{
+				Path:  "planes",
+				Value: planesRaw,
+			},
+		})
+
+		if err != nil {
+			http.Error(w, "error actualizando plan: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+		})
 	}
 }
