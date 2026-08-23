@@ -116,7 +116,8 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		DNI string `json:"dni"`
+		DNI   string `json:"dni"`
+		Flujo string `json:"flujo"` // "primer_ingreso" o "recuperar_password"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "JSON invalido", http.StatusBadRequest)
@@ -144,9 +145,15 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ya tiene cuenta creada, no debería pedir código de nuevo
-	if afiliado.UID != "" {
-		http.Error(w, "Este DNI ya tiene una cuenta creada", http.StatusConflict)
+	// Primer Ingreso: si ya tiene cuenta, no debería pedir código de nuevo por acá
+	if req.Flujo == "primer_ingreso" && afiliado.UID != "" {
+		http.Error(w, "DNI inválido", http.StatusBadRequest)
+		return
+	}
+
+	// Recuperar Password: si todavía NO tiene cuenta, no hay password que recuperar
+	if req.Flujo == "recuperar_password" && afiliado.UID == "" {
+		http.Error(w, "DNI inválido", http.StatusBadRequest)
 		return
 	}
 
@@ -270,6 +277,7 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
 		return
 	}
+
 	var cv CodigoVerificacion
 	codigoDoc.DataTo(&cv)
 	if !cv.Verificado {
@@ -336,4 +344,86 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"uid": userRecord.UID})
+}
+
+func CambiarPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Metodo no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		DNI      string `json:"dni"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "JSON invalido", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) < 8 {
+		http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+
+	// Mismo chequeo que CrearPassword: no confiamos en que el frontend
+	// "diga" que ya verificó el código, lo confirmamos contra Firestore.
+	codigoDoc, err := FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Get(ctx)
+	if err != nil || !codigoDoc.Exists() {
+		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
+		return
+	}
+	var cv CodigoVerificacion
+	codigoDoc.DataTo(&cv)
+	if !cv.Verificado {
+		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
+		return
+	}
+
+	afiliadoRef := FirestoreClient.Collection("socios").Doc(req.DNI)
+	afiliadoDoc, err := afiliadoRef.Get(ctx)
+	if err != nil || !afiliadoDoc.Exists() {
+		http.Error(w, "Afiliado no encontrado", http.StatusBadRequest)
+		return
+	}
+	var afiliado AfiliadoPreRegistrado
+	afiliadoDoc.DataTo(&afiliado)
+
+	// A diferencia de CrearPassword: acá SÍ necesitamos que ya tenga cuenta.
+	// Si nunca la activó, no hay password que cambiar, tiene que hacer Primer Ingreso.
+	if afiliado.UID == "" {
+		http.Error(w, "Todavía no activaste tu cuenta. Hacé el Primer Ingreso primero.", http.StatusBadRequest)
+		return
+	}
+
+	updateParams := (&firebaseauth.UserToUpdate{}).Password(req.Password)
+	if _, err := AuthClient.UpdateUser(ctx, afiliado.UID, updateParams); err != nil {
+		log.Printf("error actualizando password para uid %s (dni %s): %v", afiliado.UID, req.DNI, err)
+		http.Error(w, "Error actualizando la contraseña", http.StatusInternalServerError)
+		return
+	}
+
+	// Limpiamos el código, ya cumplió su función
+	FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Delete(ctx)
+
+	// Generamos un custom token para que el frontend pueda loguear
+	// directo al usuario tras el cambio, sin pedirle que ingrese de nuevo.
+	customToken, err := AuthClient.CustomToken(ctx, afiliado.UID)
+	if err != nil {
+		log.Printf("error generando custom token para uid %s: %v", afiliado.UID, err)
+		// No cortamos la respuesta por esto: la password ya se cambió bien,
+		// simplemente el usuario va a tener que loguearse manualmente.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"uid": afiliado.UID})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"uid": afiliado.UID, "customToken": customToken})
 }

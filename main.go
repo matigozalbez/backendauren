@@ -235,6 +235,15 @@ func main() {
 		handlers.ObtenerCatalogoPlan(firebase.Client)(w, r)
 	})
 
+	mux.HandleFunc("/api/afiliados/cambiar-password", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CambiarPassword(w, r)
+	})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")
