@@ -16,6 +16,7 @@ func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 		"http://localhost:5173",
 		"https://choferesunidos.com.ar",
 		"http://localhost:5174",
+		"http://localhost:4173",
 		"https://appauren-alpha.vercel.app", // Sin la barra / al final
 	}
 
