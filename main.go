@@ -244,6 +244,15 @@ func main() {
 		handlers.CambiarPassword(w, r)
 	})
 
+	mux.HandleFunc("/api/admin/crear-medico", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
+	})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")
@@ -254,4 +263,5 @@ func main() {
 	fmt.Println("Servidor corriendo en el puerto " + port)
 
 	log.Fatal(http.ListenAndServe(":"+port, mux))
+
 }
