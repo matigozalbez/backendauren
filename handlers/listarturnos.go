@@ -46,14 +46,13 @@ func ListarTurnos(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
-		query := fsClient.Collection("turnos")
+query := fsClient.Collection("turnos").OrderBy("creadoEn", firestore.Desc)
 
-		// filtro opcional: /api/admin/listar-turnos?estado=pendiente
-		if estado := r.URL.Query().Get("estado"); estado != "" {
-			query = fsClient.Collection("turnos").
-				Where("estado", "==", estado).
-				OrderBy("creadoEn", firestore.Desc)
-		}
+if estado := r.URL.Query().Get("estado"); estado != "" {
+	query = fsClient.Collection("turnos").
+		Where("estado", "==", estado).
+		OrderBy("creadoEn", firestore.Desc)
+}
 
 		iter := query.Documents(ctx)
 		defer iter.Stop()
