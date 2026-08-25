@@ -57,13 +57,13 @@ if estado := r.URL.Query().Get("estado"); estado != "" {
 		iter := query.Documents(ctx)
 		defer iter.Stop()
 
-		var turnos []TurnoAdminView
+		turnos := make([]TurnoAdminView, 0)
 		for {
 			doc, err := iter.Next()
 			if err == iterator.Done {
 				break
 			}
-		if err != nil {
+if err != nil {
     log.Printf("ERROR LEYENDO TURNOS: %v", err)
 
     http.Error(
