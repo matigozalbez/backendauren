@@ -264,6 +264,39 @@ func main() {
 	})
 
 
+	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	handlers.CrearTurno(firebase.Client, firebase.AuthClient)(w, r)
+})
+
+	mux.HandleFunc("/api/admin/listar-turnos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
+	})
+
+
+
+	
+	mux.HandleFunc("/api/admin/asignar-medico", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.AsignarMedico(firebase.Client))(w, r)
+	})
+
+
 
 
 
