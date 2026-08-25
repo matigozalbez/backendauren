@@ -253,6 +253,20 @@ func main() {
 		requireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
 	})
 
+
+		mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.ListarMedicos(firebase.Client, firebase.AuthClient)(w, r)
+	})
+
+
+
+
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"cloud.google.com/go/firestore"
+	"firebase.google.com/go/v4/auth"
 )
 
 type MedicoInput struct {
@@ -61,5 +62,48 @@ func CrearMedico(fsClient *firestore.Client) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+
+func ListarMedicos(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		_, err := verifyIDToken(r, authClient)
+		if err != nil {
+			http.Error(w, "no autorizado", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.Background()
+
+		iter := fsClient.Collection("medicos").Documents(ctx)
+		docs, err := iter.GetAll()
+		if err != nil {
+			http.Error(w, "error obteniendo medicos", http.StatusInternalServerError)
+			return
+		}
+
+
+
+		medicos := make([]map[string]interface{}, 0)
+		for _, doc := range docs {
+			data := doc.Data()
+			medicos = append(medicos, map[string]interface{}{
+				"id":         		doc.Ref.ID,
+				"nombre":     		data["nombre"],
+				"apellido":   		data["apellido"],
+				"dni":  	  		data["dni"],
+				"especialidad": 	data["especialidad"],
+				"provincia":  		data["provincia"],
+				"ciudad":     		data["ciudad"],
+				"direccion":  		data["direccion"],
+				"imagen":  	  		data["imagen"],
+
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(medicos)
 	}
 }
