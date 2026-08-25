@@ -293,7 +293,12 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.AsignarMedico(firebase.Client))(w, r)
+requireAdmin(
+    handlers.AsignarMedico(
+        firebase.Client,
+        firebase.MessagingClient,
+    ),
+)(w, r)
 	})
 
 

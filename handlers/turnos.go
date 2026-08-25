@@ -72,6 +72,7 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		socioDni, _ := socioData["dni"].(string)
 		socioNombre, _ := socioData["nombre"].(string)
 		socioApellido, _ := socioData["apellido"].(string)
+		socioEmail, _ := socioData["email"].(string)
 		nombreCompleto := strings.TrimSpace(socioNombre + " " + socioApellido)
 
 		// Datos que van al documento del turno. Por defecto es para el titular.
@@ -110,6 +111,7 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		_, err = doc.Set(ctx, map[string]interface{}{
 			"uid":                 uid,
 			"socioDni":            socioDni,
+			"socioEmail":           socioEmail,
 			"solicitadoPor":       nombreCompleto,
 			"esParaAdherente":     esParaAdherente,
 			"beneficiarioDni":     beneficiarioDni,

@@ -1,14 +1,19 @@
 package handlers
 
 import (
-    "context"
-    "encoding/json"
-    "log"
-    "net/http"
-    "strings"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"time"
 
-    "cloud.google.com/go/firestore"
-    "google.golang.org/api/iterator"
+	"cloud.google.com/go/firestore"
+	"firebase.google.com/go/v4/messaging"
+	"google.golang.org/api/iterator"
 )
 
 // ---------- Listar turnos (admin) ----------
@@ -96,7 +101,10 @@ type AsignarMedicoInput struct {
 	Hora     string `json:"hora"`  // opcional, ej "10:30"
 }
 
-func AsignarMedico(fsClient *firestore.Client) http.HandlerFunc {
+func AsignarMedico(
+	fsClient *firestore.Client,
+	msgClient *messaging.Client,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -121,26 +129,67 @@ func AsignarMedico(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
+		// =========================================================
+		// 1. BUSCAR TURNO
+		// =========================================================
+
 		turnoRef := fsClient.Collection("turnos").Doc(input.TurnoID)
+
 		turnoSnap, err := turnoRef.Get(ctx)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
 		}
-		if estadoActual, _ := turnoSnap.Data()["estado"].(string); estadoActual == "cancelado" {
-			http.Error(w, "no se puede asignar un turno cancelado", http.StatusConflict)
+
+		turnoData := turnoSnap.Data()
+
+		if estadoActual, _ := turnoData["estado"].(string); estadoActual == "cancelado" {
+			http.Error(
+				w,
+				"no se puede asignar un turno cancelado",
+				http.StatusConflict,
+			)
 			return
 		}
 
-		medicoSnap, err := fsClient.Collection("medicos").Doc(input.MedicoID).Get(ctx)
+		// Datos del usuario que solicitó el turno
+		uid, _ := turnoData["uid"].(string)
+		socioEmail, _ := turnoData["socioEmail"].(string)
+		beneficiarioNombre, _ := turnoData["beneficiarioNombre"].(string)
+		especialidad, _ := turnoData["especialidad"].(string)
+		ciudad, _ := turnoData["ciudad"].(string)
+
+		log.Printf(
+			"ASIGNANDO TURNO id=%s uid=%s email=%s beneficiario=%s",
+			input.TurnoID,
+			uid,
+			socioEmail,
+			beneficiarioNombre,
+		)
+
+		// =========================================================
+		// 2. BUSCAR MÉDICO
+		// =========================================================
+
+		medicoSnap, err := fsClient.
+			Collection("medicos").
+			Doc(input.MedicoID).
+			Get(ctx)
+
 		if err != nil {
 			http.Error(w, "médico no encontrado", http.StatusNotFound)
 			return
 		}
+
 		medicoData := medicoSnap.Data()
+
 		medicoNombre, _ := medicoData["nombre"].(string)
 		medicoApellido, _ := medicoData["apellido"].(string)
 		medicoDireccion, _ := medicoData["direccion"].(string)
+
+		// =========================================================
+		// 3. ACTUALIZAR TURNO
+		// =========================================================
 
 		updates := []firestore.Update{
 			{Path: "estado", Value: "asignado"},
@@ -152,18 +201,311 @@ func AsignarMedico(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		if input.Fecha != "" {
-			updates = append(updates, firestore.Update{Path: "fecha", Value: input.Fecha})
+			updates = append(
+				updates,
+				firestore.Update{
+					Path:  "fecha",
+					Value: input.Fecha,
+				},
+			)
 		}
+
 		if input.Hora != "" {
-			updates = append(updates, firestore.Update{Path: "hora", Value: input.Hora})
+			updates = append(
+				updates,
+				firestore.Update{
+					Path:  "hora",
+					Value: input.Hora,
+				},
+			)
 		}
 
 		if _, err := turnoRef.Update(ctx, updates); err != nil {
-			http.Error(w, "error al asignar médico", http.StatusInternalServerError)
+			log.Printf(
+				"ERROR actualizando turno %s: %v",
+				input.TurnoID,
+				err,
+			)
+
+			http.Error(
+				w,
+				"error al asignar médico",
+				http.StatusInternalServerError,
+			)
 			return
 		}
 
+		log.Printf(
+			"TURNO ASIGNADO correctamente: %s",
+			input.TurnoID,
+		)
+
+		// =========================================================
+		// 4. PUSH NOTIFICATION
+		// =========================================================
+
+		if uid != "" && msgClient != nil {
+
+			tokenSnap, err := fsClient.
+				Collection("push_tokens").
+				Doc(uid).
+				Get(ctx)
+
+			if err != nil {
+				log.Printf(
+					"WARNING: no se encontró push token para uid=%s: %v",
+					uid,
+					err,
+				)
+			} else {
+
+				tokenData := tokenSnap.Data()
+
+				token, _ := tokenData["token"].(string)
+
+				if token != "" {
+
+					push := &messaging.Message{
+						Token: token,
+
+						Webpush: &messaging.WebpushConfig{
+							Notification: &messaging.WebpushNotification{
+								Title: "Turno asignado ✅",
+								Body: fmt.Sprintf(
+									"Tu turno de %s fue asignado para el %s a las %s.",
+									especialidad,
+									input.Fecha,
+									input.Hora,
+								),
+								Icon: "/icon-192.png",
+							},
+						},
+					}
+
+					_, err := msgClient.Send(ctx, push)
+
+					if err != nil {
+						log.Printf(
+							"ERROR enviando push al uid=%s: %v",
+							uid,
+							err,
+						)
+					} else {
+						log.Printf(
+							"PUSH enviado correctamente al uid=%s",
+							uid,
+						)
+					}
+				} else {
+					log.Printf(
+						"WARNING: push_tokens/%s no tiene token",
+						uid,
+					)
+				}
+			}
+		}
+
+		// =========================================================
+		// 5. EMAIL CON RESEND
+		// =========================================================
+
+		if socioEmail != "" {
+
+			err := enviarEmailTurnoAsignado(
+				socioEmail,
+				beneficiarioNombre,
+				especialidad,
+				medicoNombre,
+				medicoApellido,
+				medicoDireccion,
+				ciudad,
+				input.Fecha,
+				input.Hora,
+			)
+
+			if err != nil {
+				log.Printf(
+					"ERROR enviando email de turno a %s: %v",
+					socioEmail,
+					err,
+				)
+			} else {
+				log.Printf(
+					"EMAIL de turno enviado correctamente a %s",
+					socioEmail,
+				)
+			}
+
+		} else {
+			log.Printf(
+				"WARNING: turno %s no tiene socioEmail",
+				input.TurnoID,
+			)
+		}
+
+		// =========================================================
+		// 6. RESPUESTA
+		// =========================================================
+
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+		})
 	}
+}
+
+
+func enviarEmailTurnoAsignado(
+	destinatario string,
+	nombre string,
+	especialidad string,
+	medicoNombre string,
+	medicoApellido string,
+	medicoDireccion string,
+	ciudad string,
+	fecha string,
+	hora string,
+) error {
+
+	log.Printf(
+		"DEBUG: enviando email de turno asignado a=%q",
+		destinatario,
+	)
+
+	html := fmt.Sprintf(`
+		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+
+			<h2 style="color:#0F1E3D;">
+				Tu turno fue asignado ✅
+			</h2>
+
+			<p>
+				Hola %s,
+			</p>
+
+			<p>
+				Tu solicitud de turno fue asignada correctamente.
+			</p>
+
+			<div style="
+				background:#F8F5EF;
+				padding:20px;
+				border-radius:16px;
+				margin:20px 0;
+			">
+
+				<p>
+					<strong>Especialidad:</strong><br>
+					%s
+				</p>
+
+				<p>
+					<strong>Profesional:</strong><br>
+					Dr. %s %s
+				</p>
+
+				<p>
+					<strong>Fecha:</strong><br>
+					%s
+				</p>
+
+				<p>
+					<strong>Hora:</strong><br>
+					%s
+				</p>
+
+				<p>
+					<strong>Dirección:</strong><br>
+					%s<br>
+					%s
+				</p>
+
+			</div>
+
+			<p>
+				Podés consultar los detalles de tu turno
+				desde Auren.
+			</p>
+
+		</div>
+	`,
+		nombre,
+		especialidad,
+		medicoNombre,
+		medicoApellido,
+		fecha,
+		hora,
+		medicoDireccion,
+		ciudad,
+	)
+
+	payload := map[string]interface{}{
+		"from": "Auren <admin@formulariosalud.com.ar>",
+		"to": []string{
+			destinatario,
+		},
+		"subject": "Tu turno fue asignado - Auren",
+		"html":    html,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	log.Printf(
+		"DEBUG: payload Resend preparado para %s",
+		destinatario,
+	)
+
+	req, err := http.NewRequest(
+		"POST",
+		"https://api.resend.com/emails",
+		bytes.NewBuffer(jsonData),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set(
+		"Authorization",
+		"Bearer "+RESEND_API_KEY,
+	)
+
+	req.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	log.Printf(
+		"DEBUG: Resend respondió status=%d body=%s",
+		resp.StatusCode,
+		string(body),
+	)
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf(
+			"resend devolvió status %d: %s",
+			resp.StatusCode,
+			string(body),
+		)
+	}
+
+	return nil
 }
