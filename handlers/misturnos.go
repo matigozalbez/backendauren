@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"cloud.google.com/go/firestore"
@@ -19,27 +20,53 @@ func MisTurnos(
 
 		w.Header().Set("Content-Type", "application/json")
 
+		log.Printf("MIS TURNOS: request recibida")
+
 		if r.Method != http.MethodGet {
+
+			log.Printf(
+				"MIS TURNOS: método no permitido: %s",
+				r.Method,
+			)
+
 			http.Error(
 				w,
 				"método no permitido",
 				http.StatusMethodNotAllowed,
 			)
+
 			return
 		}
 
 		uid, err := verifyIDToken(r, authClient)
 
 		if err != nil {
+
+			log.Printf(
+				"MIS TURNOS: error verificando token: %v",
+				err,
+			)
+
 			http.Error(
 				w,
 				"no autorizado, iniciá sesión",
 				http.StatusUnauthorized,
 			)
+
 			return
 		}
 
+		log.Printf(
+			"MIS TURNOS: UID autenticado: %s",
+			uid,
+		)
+
 		ctx := context.Background()
+
+		log.Printf(
+			"MIS TURNOS: consultando Firestore para uid=%s",
+			uid,
+		)
 
 		query := fsClient.
 			Collection("turnos").
@@ -47,6 +74,7 @@ func MisTurnos(
 			OrderBy("creadoEn", firestore.Desc)
 
 		iter := query.Documents(ctx)
+
 		defer iter.Stop()
 
 		turnos := make([]TurnoAdminView, 0)
@@ -60,13 +88,25 @@ func MisTurnos(
 			}
 
 			if err != nil {
+
+				log.Printf(
+					"MIS TURNOS: ERROR FIRESTORE: %v",
+					err,
+				)
+
 				http.Error(
 					w,
-					"error leyendo tus turnos",
+					"error leyendo tus turnos: "+err.Error(),
 					http.StatusInternalServerError,
 				)
+
 				return
 			}
+
+			log.Printf(
+				"MIS TURNOS: turno encontrado: %s",
+				doc.Ref.ID,
+			)
 
 			var turno TurnoAdminView
 
@@ -75,10 +115,24 @@ func MisTurnos(
 			b, err := json.Marshal(data)
 
 			if err != nil {
+
+				log.Printf(
+					"MIS TURNOS: error marshal turno %s: %v",
+					doc.Ref.ID,
+					err,
+				)
+
 				continue
 			}
 
 			if err := json.Unmarshal(b, &turno); err != nil {
+
+				log.Printf(
+					"MIS TURNOS: error unmarshal turno %s: %v",
+					doc.Ref.ID,
+					err,
+				)
+
 				continue
 			}
 
@@ -87,6 +141,20 @@ func MisTurnos(
 			turnos = append(turnos, turno)
 		}
 
-		json.NewEncoder(w).Encode(turnos)
+		log.Printf(
+			"MIS TURNOS: encontrados %d turnos para uid=%s",
+			len(turnos),
+			uid,
+		)
+
+		if err := json.NewEncoder(w).Encode(turnos); err != nil {
+
+			log.Printf(
+				"MIS TURNOS: error enviando respuesta: %v",
+				err,
+			)
+
+			return
+		}
 	}
 }
