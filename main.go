@@ -298,7 +298,20 @@ func main() {
 
 
 
+mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {
 
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	handlers.MisTurnos(
+		firebase.Client,
+		firebase.AuthClient,
+	)(w, r)
+})
 
 	http.HandleFunc("/api/ping", pingHandler)
 
