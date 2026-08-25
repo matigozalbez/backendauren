@@ -1,13 +1,14 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"strings"
+    "context"
+    "encoding/json"
+    "log"
+    "net/http"
+    "strings"
 
-	"cloud.google.com/go/firestore"
-	"google.golang.org/api/iterator"
+    "cloud.google.com/go/firestore"
+    "google.golang.org/api/iterator"
 )
 
 // ---------- Listar turnos (admin) ----------
@@ -45,7 +46,7 @@ func ListarTurnos(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
-		query := fsClient.Collection("turnos").OrderBy("creadoEn", firestore.Desc)
+		query := fsClient.Collection("turnos")
 
 		// filtro opcional: /api/admin/listar-turnos?estado=pendiente
 		if estado := r.URL.Query().Get("estado"); estado != "" {
@@ -63,10 +64,17 @@ func ListarTurnos(fsClient *firestore.Client) http.HandlerFunc {
 			if err == iterator.Done {
 				break
 			}
-			if err != nil {
-				http.Error(w, "error leyendo turnos", http.StatusInternalServerError)
-				return
-			}
+		if err != nil {
+    log.Printf("ERROR LEYENDO TURNOS: %v", err)
+
+    http.Error(
+        w,
+        "error leyendo turnos: "+err.Error(),
+        http.StatusInternalServerError,
+    )
+
+    return
+}
 
 			var t TurnoAdminView
 			data := doc.Data()
