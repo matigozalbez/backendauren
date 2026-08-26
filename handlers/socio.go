@@ -8,9 +8,13 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	 "regexp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
+	"strconv"
 )
 
 type AdherenteInput struct {
@@ -44,6 +48,14 @@ type SocioInput struct {
 	Adherentes            []AdherenteInput `json:"adherentes"`
 }
 
+var (
+	reDNI    = regexp.MustCompile(`^\d{7,8}$`)
+	reNombre = regexp.MustCompile(`^[A-Za-zÁÉÍÓÚáéíóúÑñÜü\s'-]{2,50}$`)
+	reEmail  = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	reCBU    = regexp.MustCompile(`^\d{22}$`)
+)
+
+
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
@@ -75,6 +87,30 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			http.Error(w, "faltan datos", http.StatusBadRequest)
 			return
 		}
+		if !reDNI.MatchString(input.DNI) {
+    http.Error(w, "DNI inválido", http.StatusBadRequest)
+    return
+}
+
+if !reNombre.MatchString(input.Nombre) {
+    http.Error(w, "nombre inválido", http.StatusBadRequest)
+    return
+}
+
+if !reNombre.MatchString(input.Apellido) {
+    http.Error(w, "apellido inválido", http.StatusBadRequest)
+    return
+}
+
+if input.Email != "" && !reEmail.MatchString(input.Email) {
+    http.Error(w, "email inválido", http.StatusBadRequest)
+    return
+}
+
+if input.CBU != "" && !reCBU.MatchString(input.CBU) {
+	http.Error(w, "CBU inválido", http.StatusBadRequest)
+	return
+}
 		if len(input.Planes) > 4 {
 			http.Error(w, "máximo 4 planes por socio", http.StatusBadRequest)
 			return
@@ -90,15 +126,42 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 		// Convertimos adherentes a []interface{} para que Firestore lo
 		// guarde como array de mapas
 		adherentesData := make([]interface{}, 0, len(input.Adherentes))
-		for _, a := range input.Adherentes {
-			adherentesData = append(adherentesData, map[string]interface{}{
-				"relacion": a.Relacion,
-				"nombre":   a.Nombre,
-				"apellido": a.Apellido,
-				"dni":      a.DNI,
-				"edad":     a.Edad,
-			})
-		}
+for _, a := range input.Adherentes {
+
+	if a.Nombre == "" || a.Apellido == "" || a.DNI == "" {
+		http.Error(w, "faltan datos del adherente", http.StatusBadRequest)
+		return
+	}
+
+	if !reDNI.MatchString(a.DNI) {
+		http.Error(w, "DNI de adherente inválido", http.StatusBadRequest)
+		return
+	}
+
+	if !reNombre.MatchString(a.Nombre) {
+		http.Error(w, "nombre de adherente inválido", http.StatusBadRequest)
+		return
+	}
+
+	if !reNombre.MatchString(a.Apellido) {
+		http.Error(w, "apellido de adherente inválido", http.StatusBadRequest)
+		return
+	}
+
+edad, err := strconv.Atoi(a.Edad)
+if err != nil || edad < 1 || edad > 120 {
+	http.Error(w, "edad de adherente inválida", http.StatusBadRequest)
+	return
+}
+
+	adherentesData = append(adherentesData, map[string]interface{}{
+		"relacion": a.Relacion,
+		"nombre":   a.Nombre,
+		"apellido": a.Apellido,
+		"dni":      a.DNI,
+		"edad":     a.Edad,
+	})
+}
 
 		planesData := make([]interface{}, 0, len(input.Planes))
 		for _, p := range input.Planes {
@@ -113,7 +176,22 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		_, err := fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
+
+doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
+
+if err == nil && doc.Exists() {
+	http.Error(w, "el socio ya existe", http.StatusConflict)
+	return
+}
+
+if err != nil && status.Code(err) != codes.NotFound {
+	http.Error(w, "error verificando socio", http.StatusInternalServerError)
+	return
+}
+
+		
+		
+		_, err = fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
 			"dni":                   input.DNI,
 			"nombre":                input.Nombre,
 			"apellido":              input.Apellido,
