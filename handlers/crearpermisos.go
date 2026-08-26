@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"io"
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
@@ -122,35 +123,65 @@ func generarPasswordTemporal() (string, error) {
 
 // Reemplazá esto por tu helper de Resend ya existente si lo tenés (el que usa CrearPassword/SolicitarCodigo).
 func enviarEmailBienvenidaAdmin(to, nombre, resetLink string) error {
+	fmt.Printf("\n=== [RESEND LOG] Iniciando envío de mail ===\n")
+	fmt.Printf("-> Destinatario (to): %s\n", to)
+	fmt.Printf("-> Nombre: %s\n", nombre)
+	fmt.Printf("-> ResetLink: %s\n", resetLink)
+	fmt.Printf("-> Longitud RESEND_API_KEY: %d caracteres\n", len(RESEND_API_KEY))
+
 	html := fmt.Sprintf(`
 		<p>Hola %s,</p>
 		<p>Se creó una cuenta de administrador para vos en el Panel Admin de Auren.</p>
 		<p><a href="%s">Hacé clic acá para elegir tu contraseña</a> y después ingresá con tu email.</p>
 	`, nombre, resetLink)
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"from":    "Auren <no-reply@tudominio.com>", // ajustá al remitente que ya tenés verificado en Resend
+	payload := map[string]interface{}{
+		"from":    "Auren <no-reply@tudominio.com>", // Recordá poner acá tu dirección verificada en Resend
 		"to":      []string{to},
 		"subject": "Te dieron acceso al Panel Admin de Auren",
 		"html":    html,
-	})
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Printf("❌ [RESEND LOG] Error haciendo Marshal del JSON: %v\n", err)
+		return err
+	}
+	fmt.Printf("-> Body JSON preparado: %s\n", string(body))
 
 	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewBuffer(body))
 	if err != nil {
+		fmt.Printf("❌ [RESEND LOG] Error creando http.NewRequest: %v\n", err)
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+RESEND_API_KEY)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Printf("-> Enviando HTTP POST a Resend...\n")
+	
 	resp, err := client.Do(req)
 	if err != nil {
+		fmt.Printf("❌ [RESEND LOG] Error en la petición de red (client.Do): %v\n", err)
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("resend devolvió status %d", resp.StatusCode)
+	// Leemos la respuesta completa del cuerpo devuelto por Resend
+	respBodyBytes, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		fmt.Printf("⚠️ [RESEND LOG] No se pudo leer el body de la respuesta: %v\n", readErr)
 	}
+	respBodyStr := string(respBodyBytes)
+
+	fmt.Printf("-> HTTP Status Code: %d\n", resp.StatusCode)
+	fmt.Printf("-> Resend Response Body: %s\n", respBodyStr)
+
+	if resp.StatusCode >= 300 {
+		fmt.Printf("❌ [RESEND LOG] Falló el envío. Status >= 300\n")
+		return fmt.Errorf("resend devolvió status %d: %s", resp.StatusCode, respBodyStr)
+	}
+
+	fmt.Printf("✅ [RESEND LOG] Mail enviado con éxito!\n===========================================\n\n")
 	return nil
 }
