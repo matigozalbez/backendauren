@@ -135,12 +135,12 @@ func enviarEmailBienvenidaAdmin(to, nombre, resetLink string) error {
 		<p><a href="%s">Hacé clic acá para elegir tu contraseña</a> y después ingresá con tu email.</p>
 	`, nombre, resetLink)
 
-	payload := map[string]interface{}{
-		"from":    "Auren <no-reply@tudominio.com>", // Recordá poner acá tu dirección verificada en Resend
-		"to":      []string{to},
-		"subject": "Te dieron acceso al Panel Admin de Auren",
-		"html":    html,
-	}
+payload := map[string]interface{}{
+    "from":    "Auren <admin@formulariosalud.com.ar>",
+    "to":      []string{to},
+    "subject": "Te dieron acceso al Panel Admin de Auren",
+    "html":    html,
+}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
