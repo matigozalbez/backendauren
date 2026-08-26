@@ -318,6 +318,34 @@ mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {
 	)(w, r)
 })
 
+mux.HandleFunc("/api/admin/otorgar-admin", func(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	requireAdmin(handlers.OtorgarAdmin(firebase.AuthClient))(w, r)
+})
+
+mux.HandleFunc("/api/admin/revocar-admin", func(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	requireAdmin(handlers.RevocarAdmin(firebase.AuthClient))(w, r)
+})
+
+
+mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	requireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
+})
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")
