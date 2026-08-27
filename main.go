@@ -382,17 +382,7 @@ mux.HandleFunc("/api/admin/servidor/logs", func(w http.ResponseWriter, r *http.R
 })
 
 
-mux.HandleFunc("GET /api/test-stress", func(w http.ResponseWriter, r *http.Request) {
-    counter := 0
-    for i := 0; i < 500000; i++ {
-        counter += i
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(`{"status":"ok","message":"VPS viva","result":` + string(rune(counter)) + `}`))
-})
-
+mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
 
 	http.HandleFunc("/api/ping", pingHandler)
 utils.StartMetricsMonitor()
