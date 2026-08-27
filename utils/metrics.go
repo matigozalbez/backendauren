@@ -9,14 +9,19 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
+	"github.com/shirou/gopsutil/v4/net"
 )
 
+var serverStartTime = time.Now()
+
 type ServerMetrics struct {
-	Timestamp string        `json:"timestamp"`
-	CPU       CPUMetrics    `json:"cpu"`
-	Memory    MemoryMetrics `json:"memory"`
-	Disk      DiskMetrics   `json:"disk"`
-	Uptime    uint64        `json:"uptime_seconds"`
+	Timestamp    string         `json:"timestamp"`
+	CPU          CPUMetrics     `json:"cpu"`
+	Memory       MemoryMetrics  `json:"memory"`
+	Disk         DiskMetrics    `json:"disk"`
+	Network      NetworkMetrics `json:"network"`
+	Uptime       uint64         `json:"uptime_seconds"`
+	SystemUptime uint64         `json:"system_uptime_seconds"`
 }
 
 type CPUMetrics struct {
@@ -36,6 +41,15 @@ type DiskMetrics struct {
 	UsedGB       uint64  `json:"used_gb"`
 	FreeGB       uint64  `json:"free_gb"`
 	UsagePercent float64 `json:"usage_percent"`
+}
+
+type NetworkMetrics struct {
+	BytesReceived   uint64 `json:"bytes_received"`
+	BytesSent       uint64 `json:"bytes_sent"`
+	PacketsReceived uint64 `json:"packets_received"`
+	PacketsSent     uint64 `json:"packets_sent"`
+	ErrorsReceived  uint64 `json:"errors_received"`
+	ErrorsSent      uint64 `json:"errors_sent"`
 }
 
 var metricsMutex sync.Mutex
@@ -72,9 +86,32 @@ func GetServerMetrics() (*ServerMetrics, error) {
 		return nil, err
 	}
 
-	uptime, err := host.Uptime()
+	// Uptime del sistema operativo / VPS
+	systemUptime, err := host.Uptime()
 	if err != nil {
 		return nil, err
+	}
+
+	// Uptime del backend Go
+	serverUptime := uint64(time.Since(serverStartTime).Seconds())
+
+	// Métricas de red
+	networkStats, err := net.IOCounters(false)
+	if err != nil {
+		return nil, err
+	}
+
+	network := NetworkMetrics{}
+
+	if len(networkStats) > 0 {
+		network = NetworkMetrics{
+			BytesReceived:   networkStats[0].BytesRecv,
+			BytesSent:       networkStats[0].BytesSent,
+			PacketsReceived: networkStats[0].PacketsRecv,
+			PacketsSent:     networkStats[0].PacketsSent,
+			ErrorsReceived:  networkStats[0].Errin,
+			ErrorsSent:      networkStats[0].Errout,
+		}
 	}
 
 	metrics := &ServerMetrics{
@@ -99,7 +136,13 @@ func GetServerMetrics() (*ServerMetrics, error) {
 			UsagePercent: diskUsage.UsedPercent,
 		},
 
-		Uptime: uptime,
+		Network: network,
+
+		// Backend Go
+		Uptime: serverUptime,
+
+		// VPS / sistema operativo
+		SystemUptime: systemUptime,
 	}
 
 	checkCriticalStates(metrics)
@@ -158,7 +201,6 @@ func checkMetric(name string, value float64, threshold float64, state *bool) {
 		)
 	}
 }
-
 
 func StartMetricsMonitor() {
 	go func() {
