@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+		"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
@@ -36,15 +38,44 @@ func CrearMedico(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		if input.Nombre == "" || input.Apellido == "" || input.DNI == "" || input.Ciudad == "" || input.Especialidad == "" || input.Direccion == "" {
-			http.Error(w, "faltan datos", http.StatusBadRequest)
-			return
-		}
+
+		if input.Nombre == "" || input.Apellido == "" || input.DNI == "" ||
+	input.Ciudad == "" || input.Especialidad == "" || input.Direccion == "" {
+	http.Error(w, "faltan datos", http.StatusBadRequest)
+	return
+}
+
+if !reDNI.MatchString(input.DNI) {
+	http.Error(w, "DNI inválido", http.StatusBadRequest)
+	return
+}
+
+if !reNombre.MatchString(input.Nombre) {
+	http.Error(w, "nombre inválido", http.StatusBadRequest)
+	return
+}
+
+if !reNombre.MatchString(input.Apellido) {
+	http.Error(w, "apellido inválido", http.StatusBadRequest)
+	return
+}
 
 
 
 		ctx := context.Background()
-		_, err := fsClient.Collection("medicos").Doc(input.DNI).Set(ctx, map[string]interface{}{
+
+doc, err := fsClient.Collection("medicos").Doc(input.DNI).Get(ctx)
+
+if err == nil && doc.Exists() {
+	http.Error(w, "el médico ya existe", http.StatusConflict)
+	return
+}
+
+if err != nil && status.Code(err) != codes.NotFound {
+	http.Error(w, "error verificando médico", http.StatusInternalServerError)
+	return
+}
+		_, err = fsClient.Collection("medicos").Doc(input.DNI).Set(ctx, map[string]interface{}{
 			"nombre":                input.Nombre,
 			"apellido":              input.Apellido,
 			"dni":                   input.DNI,

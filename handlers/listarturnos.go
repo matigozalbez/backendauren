@@ -240,10 +240,51 @@ func AsignarMedico(
 			input.TurnoID,
 		)
 
-		// =========================================================
-		// 4. PUSH NOTIFICATION
-		// =========================================================
+		socioDni, _ := turnoData["socioDni"].(string)
+		beneficiarioDni, _ := turnoData["beneficiarioDni"].(string)
+		esParaAdherente, _ := turnoData["esParaAdherente"].(bool)
+		direccion, _ := turnoData["direccion"].(string)
 
+		fechaFinal, _ := turnoData["fecha"].(string)
+		if input.Fecha != "" {
+			fechaFinal = input.Fecha
+		}
+
+		horaFinal, _ := turnoData["hora"].(string)
+		if input.Hora != "" {
+			horaFinal = input.Hora
+		}
+
+		_, err = fsClient.Collection("historial_turnos").Doc(input.TurnoID).Set(ctx, map[string]interface{}{
+			"turnoId":            input.TurnoID,
+			"uid":                uid,
+			"socioDni":           socioDni,
+			"beneficiarioDni":    beneficiarioDni,
+			"beneficiarioNombre": beneficiarioNombre,
+			"esParaAdherente":    esParaAdherente,
+			"especialidad":       especialidad,
+			"ciudad":             ciudad,
+			"direccion":          direccion,
+			"medicoId":           input.MedicoID,
+			"medicoNombre":       medicoNombre,
+			"medicoApellido":     medicoApellido,
+			"medicoDireccion":    medicoDireccion,
+			"fecha":              fechaFinal,
+			"hora":               horaFinal,
+			"estado":             "asignado",
+			"asignadoEn":         firestore.ServerTimestamp,
+		})
+		if err != nil {
+			// No cortamos el flujo: el turno ya quedó asignado correctamente,
+			// esto es solo el registro de historial para el admin.
+			log.Printf(
+				"WARNING: error guardando historial del turno %s: %v",
+				input.TurnoID,
+				err,
+			)
+		}
+
+		
 		if uid != "" && msgClient != nil {
 
 			tokenSnap, err := fsClient.

@@ -346,6 +346,18 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 	requireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
 })
 
+
+	mux.HandleFunc("/api/admin/listar-historial-turnos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requireAdmin(handlers.ListarHistorial(firebase.Client))(w, r)
+	})
+
+
+
 	http.HandleFunc("/api/ping", pingHandler)
 
 	port := os.Getenv("PORT")

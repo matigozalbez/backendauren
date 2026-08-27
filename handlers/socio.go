@@ -14,8 +14,28 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
+ 	"google.golang.org/api/iterator"
 	"strconv"
+	"log"
 )
+
+type HistorialAdminView struct {
+	ID                 string `json:"id"`
+	TurnoID            string `json:"turnoId"`
+	SocioDni           string `json:"socioDni"`
+	BeneficiarioDni    string `json:"beneficiarioDni"`
+	BeneficiarioNombre string `json:"beneficiarioNombre"`
+	EsParaAdherente    bool   `json:"esParaAdherente"`
+	Especialidad       string `json:"especialidad"`
+	Ciudad             string `json:"ciudad"`
+	Direccion          string `json:"direccion"`
+	MedicoNombre       string `json:"medicoNombre"`
+	MedicoApellido     string `json:"medicoApellido"`
+	MedicoDireccion    string `json:"medicoDireccion"`
+	Fecha              string `json:"fecha"`
+	Hora               string `json:"hora"`
+	Estado             string `json:"estado"`
+}
 
 type AdherenteInput struct {
 	Relacion string `json:"relacion"`
@@ -315,6 +335,7 @@ func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFu
 	}
 }
 
+
 func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
@@ -490,5 +511,54 @@ func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
 		})
+	}
+}
+func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx := context.Background()
+
+		q := fsClient.Collection("historial_turnos").Query
+
+		if estado := r.URL.Query().Get("estado"); estado != "" {
+			q = q.Where("estado", "==", estado)
+		}
+
+		if socioDni := r.URL.Query().Get("socioDni"); socioDni != "" {
+			q = q.Where("socioDni", "==", socioDni)
+		}
+
+		q = q.OrderBy("asignadoEn", firestore.Desc)
+
+		iter := q.Documents(ctx)
+		defer iter.Stop()
+
+		historial := make([]HistorialAdminView, 0)
+		for {
+			doc, err := iter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				log.Printf("ERROR LEYENDO HISTORIAL: %v", err)
+				http.Error(w, "error leyendo historial: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var h HistorialAdminView
+			data := doc.Data()
+			b, _ := json.Marshal(data)
+			_ = json.Unmarshal(b, &h)
+			h.ID = doc.Ref.ID
+			historial = append(historial, h)
+		}
+
+		json.NewEncoder(w).Encode(historial)
 	}
 }

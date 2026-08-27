@@ -262,11 +262,20 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JSON invalido", http.StatusBadRequest)
 		return
 	}
+if req.DNI == "" || req.Password == "" {
+	http.Error(w, "faltan datos", http.StatusBadRequest)
+	return
+}
 
-	if len(req.Password) < 8 {
-		http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
-		return
-	}
+if !reDNI.MatchString(req.DNI) {
+	http.Error(w, "DNI inválido", http.StatusBadRequest)
+	return
+}
+
+if len(req.Password) < 8 {
+	http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
+	return
+}
 
 	ctx := context.Background()
 
@@ -361,16 +370,26 @@ func CambiarPassword(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "JSON invalido", http.StatusBadRequest)
-		return
-	}
+	http.Error(w, "JSON invalido", http.StatusBadRequest)
+	return
+}
 
-	if len(req.Password) < 8 {
-		http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
-		return
-	}
+if req.DNI == "" || req.Password == "" {
+	http.Error(w, "faltan datos", http.StatusBadRequest)
+	return
+}
 
-	ctx := context.Background()
+if !reDNI.MatchString(req.DNI) {
+	http.Error(w, "DNI inválido", http.StatusBadRequest)
+	return
+}
+
+if len(req.Password) < 8 {
+	http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
+	return
+}
+
+ctx := context.Background()
 
 	// Mismo chequeo que CrearPassword: no confiamos en que el frontend
 	// "diga" que ya verificó el código, lo confirmamos contra Firestore.
