@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/matigozalbez/backendauren/utils"
+	"aurenbackend/utils"
 )
 
 func MetricasServidor(w http.ResponseWriter, r *http.Request) {

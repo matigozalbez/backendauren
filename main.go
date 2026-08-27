@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	"aurenbackend/utils"
 )
 
 var adminSecretEnv = "adminkey"
@@ -369,9 +370,21 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 })
 
 
+mux.HandleFunc("/api/admin/servidor/logs", func(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	requireAdmin(handlers.LogsServidor)(w, r)
+})
+
+
 
 	http.HandleFunc("/api/ping", pingHandler)
-
+utils.StartMetricsMonitor()
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
