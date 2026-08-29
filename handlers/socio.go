@@ -199,15 +199,36 @@ if err != nil || edad < 1 || edad > 120 {
 
 doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
 
-if err == nil && doc.Exists() {
-	http.Error(w, "el socio ya existe", http.StatusConflict)
-	return
-}
 
 if err != nil && status.Code(err) != codes.NotFound {
 	http.Error(w, "error verificando socio", http.StatusInternalServerError)
 	return
 }
+
+if err == nil && doc.Exists() {
+	http.Error(w, "el socio ya existe", http.StatusConflict)
+	return
+}
+
+emailToSave := input.Email
+if input.Email != "" {
+	emailToSave = strings.ToLower(strings.TrimSpace(input.Email))
+	iter := fsClient.Collection("socios").Where("email", "==", emailToSave).Limit(1).Documents(ctx)
+	docs, err := iter.GetAll()
+	if err != nil {
+		http.Error(w, "error verificando email", http.StatusInternalServerError)
+		return
+	}
+	if len(docs) > 0 {
+		http.Error(w, "el email ya está registrado", http.StatusConflict)
+		return
+	}
+}
+
+
+
+
+
 
 		
 		
@@ -215,7 +236,7 @@ if err != nil && status.Code(err) != codes.NotFound {
 			"dni":                   input.DNI,
 			"nombre":                input.Nombre,
 			"apellido":              input.Apellido,
-			"email":                 input.Email,
+			"email":                 emailToSave,
 			"edad":                  input.Edad,
 			"provincia":             input.Provincia,
 			"ciudad":                input.Ciudad,
