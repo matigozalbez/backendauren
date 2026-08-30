@@ -11,19 +11,12 @@ import (
 
 	"github.com/joho/godotenv"
 	"aurenbackend/utils"
+	"aurenbackend/middleware"
+
 )
 
-var adminSecretEnv = "adminkey"
 
-func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Admin-Secret") != adminSecretEnv {
-			http.Error(w, "no autorizado", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
+
 
 func main() {
 
@@ -31,13 +24,7 @@ func main() {
 		log.Println("Aviso: No se encontro el archivo env")
 	}
 
-	handlers.RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
 
-	if val := os.Getenv("ADMIN_SECRET_KEY"); val != "" {
-		adminSecretEnv = val
-	} else {
-		log.Println("Aviso: ADMIN_SECRET_KEY no está configurada, usando default")
-	}
 
 	firebase.Init()
 	mux := http.NewServeMux()
@@ -66,7 +53,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.CrearSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearSocio(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/vincular-socio", func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +135,7 @@ func main() {
 			return
 		}
 		// Acá ya le pasas el firebase.Client y firebase.MessagingClient de tu init global
-		requireAdmin(handlers.CrearNotificacion(firebase.Client, firebase.MessagingClient))(w, r)
+		middleware.RequireAdmin(handlers.CrearNotificacion(firebase.Client, firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-socios", func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +144,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ListarSocios(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarSocios(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/notificaciones", func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +162,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.CrearOActualizarCatalogoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearOActualizarCatalogoPlan(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/obtener-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +171,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ObtenerCatalogoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ObtenerCatalogoPlan(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/socios/beneficios", func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +180,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ActualizarBeneficiosSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarBeneficiosSocio(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +189,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ListarCatalogoPlanes(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarCatalogoPlanes(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-socio/", func(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +198,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ActualizarEstadoSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarEstadoSocio(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-estadoplan/", func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +207,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ActualizarEstadoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarEstadoPlan(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("/api/planes/detalle", func(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +238,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
 	})
 
 
@@ -282,7 +269,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
 	})
 
 
@@ -294,7 +281,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-requireAdmin(
+middleware.RequireAdmin(
     handlers.AsignarMedico(
         firebase.Client,
         firebase.MessagingClient,
@@ -325,7 +312,7 @@ mux.HandleFunc("/api/admin/otorgar-admin", func(w http.ResponseWriter, r *http.R
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	requireAdmin(handlers.OtorgarAdmin(firebase.AuthClient))(w, r)
+	middleware.RequireAdmin(handlers.OtorgarAdmin(firebase.AuthClient))(w, r)
 })
 
 mux.HandleFunc("/api/admin/revocar-admin", func(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +321,7 @@ mux.HandleFunc("/api/admin/revocar-admin", func(w http.ResponseWriter, r *http.R
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	requireAdmin(handlers.RevocarAdmin(firebase.AuthClient))(w, r)
+	middleware.RequireAdmin(handlers.RevocarAdmin(firebase.AuthClient))(w, r)
 })
 
 
@@ -344,7 +331,7 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	requireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
+	middleware.RequireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
 })
 
 
@@ -354,7 +341,7 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		requireAdmin(handlers.ListarHistorial(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarHistorial(firebase.Client))(w, r)
 	})
 
 
@@ -366,7 +353,7 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	requireAdmin(handlers.MetricasServidor)(w, r)
+	middleware.RequireAdmin(handlers.MetricasServidor)(w, r)
 })
 
 
@@ -378,7 +365,7 @@ mux.HandleFunc("/api/admin/servidor/logs", func(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	requireAdmin(handlers.LogsServidor)(w, r)
+	middleware.RequireAdmin(handlers.LogsServidor)(w, r)
 })
 
 
