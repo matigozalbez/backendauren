@@ -25,11 +25,11 @@ func main() {
 	mux := http.NewServeMux()
 	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
-
-	if err := handlers.ReconstruirStats(firebase.Client); err != nil {
-		log.Fatal(err)
-	}
-
+	/*
+		if err := handlers.ReconstruirStats(firebase.Client); err != nil {
+			log.Fatal(err)
+		}
+	*/
 	err := firebase.DarAdmin("matiasgozalbez@gmail.com")
 	if err != nil {
 		log.Fatal(err)
@@ -152,7 +152,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.ObtenerNotificaciones(firebase.Client)(w, r)
+		handlers.ObtenerNotificaciones(firebase.Client, firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
