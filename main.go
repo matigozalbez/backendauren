@@ -358,7 +358,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.EstadisticasSocios(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.EstadisticasSocios)(w, r)
 	})
 
 	mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)

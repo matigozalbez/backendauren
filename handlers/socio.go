@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -249,6 +248,21 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
+		stats, errStats := leerStats()
+		if errStats == nil {
+			stats.TotalSocios++
+			switch input.Estado {
+			case "activo":
+				stats.Activos++
+			case "inactivo":
+				stats.Inactivos++
+			case "suspendido":
+				stats.Suspendidos++
+			}
+			stats.TotalAdherentes += len(input.Adherentes)
+			guardarStats(stats)
+		}
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -425,7 +439,6 @@ func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		// Estructura específica para este endpoint
 		var input struct {
 			ID         string                   `json:"id"`
 			Estado     string                   `json:"estado"`
@@ -448,20 +461,50 @@ func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
-		// Preparamos los campos a actualizar en Firestore
+		// Leemos el estado ACTUAL antes de pisarlo, para saber qué restar del contador
+		docActual, err := fsClient.Collection("socios").Doc(input.ID).Get(ctx)
+		if err != nil {
+			http.Error(w, "error obteniendo socio actual", http.StatusInternalServerError)
+			return
+		}
+		estadoAnterior, _ := docActual.Data()["estado"].(string)
+
 		updates := []firestore.Update{
 			{Path: "estado", Value: input.Estado},
 		}
 
-		// Si mandaste adherentes actualizados, los incluimos también
 		if input.Adherentes != nil {
 			updates = append(updates, firestore.Update{Path: "adherentes", Value: input.Adherentes})
 		}
 
-		_, err := fsClient.Collection("socios").Doc(input.ID).Update(ctx, updates)
+		_, err = fsClient.Collection("socios").Doc(input.ID).Update(ctx, updates)
 		if err != nil {
 			http.Error(w, "error al actualizar en firestore: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Actualizamos el contador local: restamos del estado viejo, sumamos al nuevo
+		if estadoAnterior != input.Estado {
+			stats, errStats := leerStats()
+			if errStats == nil {
+				switch estadoAnterior {
+				case "activo":
+					stats.Activos--
+				case "inactivo":
+					stats.Inactivos--
+				case "suspendido":
+					stats.Suspendidos--
+				}
+				switch input.Estado {
+				case "activo":
+					stats.Activos++
+				case "inactivo":
+					stats.Inactivos++
+				case "suspendido":
+					stats.Suspendidos++
+				}
+				guardarStats(stats)
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -611,55 +654,5 @@ func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(historial)
-	}
-}
-
-func EstadisticasSocios(fsClient *firestore.Client) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.Background()
-		iter := fsClient.Collection("socios").Documents(ctx)
-		inicio := time.Now()
-		docs, err := iter.GetAll()
-		log.Printf("GetAll socios tardó: %v", time.Since(inicio))
-		if err != nil {
-			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
-			return
-		}
-
-		totalSocios := 0
-		activos := 0
-		inactivos := 0
-		suspendidos := 0
-		totalAdherentes := 0
-
-		for _, doc := range docs {
-			data := doc.Data()
-			totalSocios++
-
-			estado, _ := data["estado"].(string)
-			switch estado {
-			case "activo":
-				activos++
-			case "inactivo":
-				inactivos++
-			case "suspendido":
-				suspendidos++
-			}
-
-			if adherentes, ok := data["adherentes"].([]interface{}); ok {
-				totalAdherentes += len(adherentes)
-			}
-		}
-
-		respuesta := map[string]interface{}{
-			"totalSocios":     totalSocios,
-			"activos":         activos,
-			"inactivos":       inactivos,
-			"suspendidos":     suspendidos,
-			"totalAdherentes": totalAdherentes,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(respuesta)
 	}
 }
