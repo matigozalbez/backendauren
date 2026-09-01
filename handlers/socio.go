@@ -7,16 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
-	 "regexp"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"log"
+	"strconv"
+
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
- 	"google.golang.org/api/iterator"
-	"strconv"
-	"log"
+	"google.golang.org/api/iterator"
 )
 
 type HistorialAdminView struct {
@@ -75,7 +77,6 @@ var (
 	reCBU    = regexp.MustCompile(`^\d{22}$`)
 )
 
-
 func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
@@ -108,29 +109,29 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 		if !reDNI.MatchString(input.DNI) {
-    http.Error(w, "DNI inválido", http.StatusBadRequest)
-    return
-}
+			http.Error(w, "DNI inválido", http.StatusBadRequest)
+			return
+		}
 
-if !reNombre.MatchString(input.Nombre) {
-    http.Error(w, "nombre inválido", http.StatusBadRequest)
-    return
-}
+		if !reNombre.MatchString(input.Nombre) {
+			http.Error(w, "nombre inválido", http.StatusBadRequest)
+			return
+		}
 
-if !reNombre.MatchString(input.Apellido) {
-    http.Error(w, "apellido inválido", http.StatusBadRequest)
-    return
-}
+		if !reNombre.MatchString(input.Apellido) {
+			http.Error(w, "apellido inválido", http.StatusBadRequest)
+			return
+		}
 
-if input.Email != "" && !reEmail.MatchString(input.Email) {
-    http.Error(w, "email inválido", http.StatusBadRequest)
-    return
-}
+		if input.Email != "" && !reEmail.MatchString(input.Email) {
+			http.Error(w, "email inválido", http.StatusBadRequest)
+			return
+		}
 
-if input.CBU != "" && !reCBU.MatchString(input.CBU) {
-	http.Error(w, "CBU inválido", http.StatusBadRequest)
-	return
-}
+		if input.CBU != "" && !reCBU.MatchString(input.CBU) {
+			http.Error(w, "CBU inválido", http.StatusBadRequest)
+			return
+		}
 		if len(input.Planes) > 4 {
 			http.Error(w, "máximo 4 planes por socio", http.StatusBadRequest)
 			return
@@ -146,42 +147,42 @@ if input.CBU != "" && !reCBU.MatchString(input.CBU) {
 		// Convertimos adherentes a []interface{} para que Firestore lo
 		// guarde como array de mapas
 		adherentesData := make([]interface{}, 0, len(input.Adherentes))
-for _, a := range input.Adherentes {
+		for _, a := range input.Adherentes {
 
-	if a.Nombre == "" || a.Apellido == "" || a.DNI == "" {
-		http.Error(w, "faltan datos del adherente", http.StatusBadRequest)
-		return
-	}
+			if a.Nombre == "" || a.Apellido == "" || a.DNI == "" {
+				http.Error(w, "faltan datos del adherente", http.StatusBadRequest)
+				return
+			}
 
-	if !reDNI.MatchString(a.DNI) {
-		http.Error(w, "DNI de adherente inválido", http.StatusBadRequest)
-		return
-	}
+			if !reDNI.MatchString(a.DNI) {
+				http.Error(w, "DNI de adherente inválido", http.StatusBadRequest)
+				return
+			}
 
-	if !reNombre.MatchString(a.Nombre) {
-		http.Error(w, "nombre de adherente inválido", http.StatusBadRequest)
-		return
-	}
+			if !reNombre.MatchString(a.Nombre) {
+				http.Error(w, "nombre de adherente inválido", http.StatusBadRequest)
+				return
+			}
 
-	if !reNombre.MatchString(a.Apellido) {
-		http.Error(w, "apellido de adherente inválido", http.StatusBadRequest)
-		return
-	}
+			if !reNombre.MatchString(a.Apellido) {
+				http.Error(w, "apellido de adherente inválido", http.StatusBadRequest)
+				return
+			}
 
-edad, err := strconv.Atoi(a.Edad)
-if err != nil || edad < 1 || edad > 120 {
-	http.Error(w, "edad de adherente inválida", http.StatusBadRequest)
-	return
-}
+			edad, err := strconv.Atoi(a.Edad)
+			if err != nil || edad < 1 || edad > 120 {
+				http.Error(w, "edad de adherente inválida", http.StatusBadRequest)
+				return
+			}
 
-	adherentesData = append(adherentesData, map[string]interface{}{
-		"relacion": a.Relacion,
-		"nombre":   a.Nombre,
-		"apellido": a.Apellido,
-		"dni":      a.DNI,
-		"edad":     a.Edad,
-	})
-}
+			adherentesData = append(adherentesData, map[string]interface{}{
+				"relacion": a.Relacion,
+				"nombre":   a.Nombre,
+				"apellido": a.Apellido,
+				"dni":      a.DNI,
+				"edad":     a.Edad,
+			})
+		}
 
 		planesData := make([]interface{}, 0, len(input.Planes))
 		for _, p := range input.Planes {
@@ -197,41 +198,33 @@ if err != nil || edad < 1 || edad > 120 {
 
 		ctx := context.Background()
 
-doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
+		doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
 
+		if err != nil && status.Code(err) != codes.NotFound {
+			http.Error(w, "error verificando socio", http.StatusInternalServerError)
+			return
+		}
 
-if err != nil && status.Code(err) != codes.NotFound {
-	http.Error(w, "error verificando socio", http.StatusInternalServerError)
-	return
-}
+		if err == nil && doc.Exists() {
+			http.Error(w, "el socio ya existe", http.StatusConflict)
+			return
+		}
 
-if err == nil && doc.Exists() {
-	http.Error(w, "el socio ya existe", http.StatusConflict)
-	return
-}
+		emailToSave := input.Email
+		if input.Email != "" {
+			emailToSave = strings.ToLower(strings.TrimSpace(input.Email))
+			iter := fsClient.Collection("socios").Where("email", "==", emailToSave).Limit(1).Documents(ctx)
+			docs, err := iter.GetAll()
+			if err != nil {
+				http.Error(w, "error verificando email", http.StatusInternalServerError)
+				return
+			}
+			if len(docs) > 0 {
+				http.Error(w, "el email ya está registrado", http.StatusConflict)
+				return
+			}
+		}
 
-emailToSave := input.Email
-if input.Email != "" {
-	emailToSave = strings.ToLower(strings.TrimSpace(input.Email))
-	iter := fsClient.Collection("socios").Where("email", "==", emailToSave).Limit(1).Documents(ctx)
-	docs, err := iter.GetAll()
-	if err != nil {
-		http.Error(w, "error verificando email", http.StatusInternalServerError)
-		return
-	}
-	if len(docs) > 0 {
-		http.Error(w, "el email ya está registrado", http.StatusConflict)
-		return
-	}
-}
-
-
-
-
-
-
-		
-		
 		_, err = fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
 			"dni":                   input.DNI,
 			"nombre":                input.Nombre,
@@ -356,12 +349,35 @@ func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFu
 	}
 }
 
-
 func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
-		iter := fsClient.Collection("socios").Documents(ctx)
-		docs, err := iter.GetAll()
+
+		// limit: cuántos socios traer por página (default 20)
+		limit := 20
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		// cursor: el DNI (o ID de doc) del último socio de la página anterior
+		cursor := r.URL.Query().Get("cursor")
+
+		query := fsClient.Collection("socios").
+			OrderBy(firestore.DocumentID, firestore.Asc).
+			Limit(limit)
+
+		if cursor != "" {
+			docSnap, err := fsClient.Collection("socios").Doc(cursor).Get(ctx)
+			if err != nil {
+				http.Error(w, "cursor inválido", http.StatusBadRequest)
+				return
+			}
+			query = query.StartAfter(docSnap)
+		}
+
+		docs, err := query.Documents(ctx).GetAll()
 		if err != nil {
 			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
 			return
@@ -383,8 +399,21 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 			})
 		}
 
+		// nextCursor: el ID del último doc de esta página, para pedir la siguiente
+		var nextCursor string
+		hasMore := len(docs) == limit
+		if hasMore {
+			nextCursor = docs[len(docs)-1].Ref.ID
+		}
+
+		respuesta := map[string]interface{}{
+			"socios":     socios,
+			"nextCursor": nextCursor,
+			"hasMore":    hasMore,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(socios)
+		json.NewEncoder(w).Encode(respuesta)
 	}
 }
 
@@ -581,5 +610,53 @@ func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(historial)
+	}
+}
+
+func EstadisticasSocios(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		iter := fsClient.Collection("socios").Documents(ctx)
+		docs, err := iter.GetAll()
+		if err != nil {
+			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
+			return
+		}
+
+		totalSocios := 0
+		activos := 0
+		inactivos := 0
+		suspendidos := 0
+		totalAdherentes := 0
+
+		for _, doc := range docs {
+			data := doc.Data()
+			totalSocios++
+
+			estado, _ := data["estado"].(string)
+			switch estado {
+			case "activo":
+				activos++
+			case "inactivo":
+				inactivos++
+			case "suspendido":
+				suspendidos++
+			}
+
+			if adherentes, ok := data["adherentes"].([]interface{}); ok {
+				totalAdherentes += len(adherentes)
+			}
+		}
+
+		respuesta := map[string]interface{}{
+			"totalSocios":     totalSocios,
+			"activos":         activos,
+			"inactivos":       inactivos,
+			"suspendidos":     suspendidos,
+			"totalAdherentes": totalAdherentes,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respuesta)
 	}
 }

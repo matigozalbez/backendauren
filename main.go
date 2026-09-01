@@ -9,22 +9,17 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/joho/godotenv"
-	"aurenbackend/utils"
 	"aurenbackend/middleware"
+	"aurenbackend/utils"
 
+	"github.com/joho/godotenv"
 )
-
-
-
 
 func main() {
 
 	if err := godotenv.Load(); err != nil {
 		log.Println("Aviso: No se encontro el archivo env")
 	}
-
-
 
 	firebase.Init()
 	mux := http.NewServeMux()
@@ -241,8 +236,7 @@ func main() {
 		middleware.RequireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
 	})
 
-
-		mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -251,17 +245,16 @@ func main() {
 		handlers.ListarMedicos(firebase.Client, firebase.AuthClient)(w, r)
 	})
 
-
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
+		setCORSHeaders(w, r)
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-	handlers.CrearTurno(firebase.Client, firebase.AuthClient)(w, r)
-})
+		handlers.CrearTurno(firebase.Client, firebase.AuthClient)(w, r)
+	})
 
 	mux.HandleFunc("/api/admin/listar-turnos", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -272,68 +265,61 @@ func main() {
 		middleware.RequireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
 	})
 
-
-
-	
 	mux.HandleFunc("/api/admin/asignar-medico", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-middleware.RequireAdmin(
-    handlers.AsignarMedico(
-        firebase.Client,
-        firebase.MessagingClient,
-    ),
-)(w, r)
+		middleware.RequireAdmin(
+			handlers.AsignarMedico(
+				firebase.Client,
+				firebase.MessagingClient,
+			),
+		)(w, r)
 	})
 
+	mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {
 
+		setCORSHeaders(w, r)
 
-mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-	setCORSHeaders(w, r)
+		handlers.MisTurnos(
+			firebase.Client,
+			firebase.AuthClient,
+		)(w, r)
+	})
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
+	mux.HandleFunc("/api/admin/otorgar-admin", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.OtorgarAdmin(firebase.AuthClient))(w, r)
+	})
 
-	handlers.MisTurnos(
-		firebase.Client,
-		firebase.AuthClient,
-	)(w, r)
-})
+	mux.HandleFunc("/api/admin/revocar-admin", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.RevocarAdmin(firebase.AuthClient))(w, r)
+	})
 
-mux.HandleFunc("/api/admin/otorgar-admin", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	middleware.RequireAdmin(handlers.OtorgarAdmin(firebase.AuthClient))(w, r)
-})
-
-mux.HandleFunc("/api/admin/revocar-admin", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	middleware.RequireAdmin(handlers.RevocarAdmin(firebase.AuthClient))(w, r)
-})
-
-
-mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	middleware.RequireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
-})
-
+	mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
+	})
 
 	mux.HandleFunc("/api/admin/listar-historial-turnos", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -344,35 +330,41 @@ mux.HandleFunc("/api/admin/crear-admin", func(w http.ResponseWriter, r *http.Req
 		middleware.RequireAdmin(handlers.ListarHistorial(firebase.Client))(w, r)
 	})
 
-
 	mux.HandleFunc("/api/admin/servidor/metricas", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
+		setCORSHeaders(w, r)
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-	middleware.RequireAdmin(handlers.MetricasServidor)(w, r)
-})
+		middleware.RequireAdmin(handlers.MetricasServidor)(w, r)
+	})
 
+	mux.HandleFunc("/api/admin/servidor/logs", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
 
-mux.HandleFunc("/api/admin/servidor/logs", func(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
+		middleware.RequireAdmin(handlers.LogsServidor)(w, r)
+	})
 
-	middleware.RequireAdmin(handlers.LogsServidor)(w, r)
-})
+	mux.HandleFunc("/api/admin/listar-estadisticas", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.EstadisticasSocios(firebase.Client))(w, r)
+	})
 
-
-mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
+	mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
 
 	http.HandleFunc("/api/ping", pingHandler)
-utils.StartMetricsMonitor()
+	utils.StartMetricsMonitor()
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
