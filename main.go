@@ -26,6 +26,10 @@ func main() {
 	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
 
+	if err := handlers.ReconstruirStats(firebase.Client); err != nil {
+		log.Fatal(err)
+	}
+
 	err := firebase.DarAdmin("matiasgozalbez@gmail.com")
 	if err != nil {
 		log.Fatal(err)
