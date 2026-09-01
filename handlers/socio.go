@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -617,7 +618,9 @@ func EstadisticasSocios(fsClient *firestore.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		iter := fsClient.Collection("socios").Documents(ctx)
+		inicio := time.Now()
 		docs, err := iter.GetAll()
+		log.Printf("GetAll socios tardó: %v", time.Since(inicio))
 		if err != nil {
 			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
 			return
