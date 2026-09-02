@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +25,13 @@ var (
 )
 
 var RESEND_API_KEY string
+
+func InicializarConfig() {
+	RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
+	if RESEND_API_KEY == "" {
+		log.Println("ADVERTENCIA: RESEND_API_KEY no está seteada")
+	}
+}
 
 // son estructuras =>
 

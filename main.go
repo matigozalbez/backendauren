@@ -21,6 +21,12 @@ func main() {
 		log.Println("Aviso: No se encontro el archivo env")
 	}
 
+	if err := godotenv.Load(); err != nil {
+		log.Println("Aviso: No se encontro el archivo env")
+	}
+
+	handlers.InicializarConfig()
+
 	firebase.Init()
 	mux := http.NewServeMux()
 	handlers.FirestoreClient = firebase.Client
