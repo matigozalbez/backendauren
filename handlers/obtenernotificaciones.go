@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"cloud.google.com/go/firestore"
@@ -34,7 +35,6 @@ func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) 
 
 		var notificaciones []NotificacionResponse
 
-		// Notificaciones generales (para todos)
 		qGenerales := fsClient.Collection("notificaciones").
 			Where("tipo", "==", "general").
 			OrderBy("fecha", firestore.Desc).
@@ -47,6 +47,7 @@ func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) 
 				break
 			}
 			if err != nil {
+				log.Printf("❌ error query generales: %v", err) // 👈 nuevo
 				http.Error(w, "error leyendo notificaciones", http.StatusInternalServerError)
 				return
 			}
@@ -59,7 +60,6 @@ func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) 
 			})
 		}
 
-		// Notificaciones dirigidas a este usuario puntual
 		qUsuario := fsClient.Collection("notificaciones").
 			Where("tipo", "==", "usuario").
 			Where("user_id", "==", uid).
@@ -73,6 +73,7 @@ func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) 
 				break
 			}
 			if err != nil {
+				log.Printf("❌ error query usuario: %v", err) // 👈 nuevo
 				http.Error(w, "error leyendo notificaciones", http.StatusInternalServerError)
 				return
 			}
