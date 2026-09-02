@@ -117,51 +117,53 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		DNI   string `json:"dni"`
-		Flujo string `json:"flujo"` // "primer_ingreso" o "recuperar_password"
+		Flujo string `json:"flujo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[solicitar-codigo] JSON invalido: %v", err)
 		http.Error(w, "JSON invalido", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[solicitar-codigo] request recibido dni=%s flujo=%s", req.DNI, req.Flujo)
 
 	ctx := context.Background()
-
-	// Mensaje genérico siempre, exista o no el DNI — no queremos que este
-	// endpoint sirva para "probar" qué DNIs están cargados en la base
 	respuestaGenerica := map[string]string{"mensaje": "Si el DNI está registrado, te enviamos un código."}
 
 	doc, err := FirestoreClient.Collection("socios").Doc(req.DNI).Get(ctx)
 	if err != nil || !doc.Exists() {
-		log.Printf("DEBUG: DNI %s no encontrado en afiliadosPreRegistrados (err=%v)", req.DNI, err)
+		log.Printf("[solicitar-codigo] DNI %s no encontrado (err=%v)", req.DNI, err)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(respuestaGenerica)
 		return
 	}
+	log.Printf("[solicitar-codigo] doc encontrado para dni=%s", req.DNI)
 
 	var afiliado AfiliadoPreRegistrado
 	if err := doc.DataTo(&afiliado); err != nil {
-		log.Printf("error parseando afiliado %s: %v", req.DNI, err)
+		log.Printf("[solicitar-codigo] ERROR parseando afiliado %s: %v", req.DNI, err)
 		http.Error(w, "Error interno", 500)
 		return
 	}
+	log.Printf("[solicitar-codigo] afiliado parseado: email=%q uid=%q", afiliado.Email, afiliado.UID)
 
-	// Primer Ingreso: si ya tiene cuenta, no debería pedir código de nuevo por acá
 	if req.Flujo == "primer_ingreso" && afiliado.UID != "" {
+		log.Printf("[solicitar-codigo] rechazo: primer_ingreso pero ya tiene UID")
 		http.Error(w, "DNI inválido", http.StatusBadRequest)
 		return
 	}
-
-	// Recuperar Password: si todavía NO tiene cuenta, no hay password que recuperar
 	if req.Flujo == "recuperar_password" && afiliado.UID == "" {
+		log.Printf("[solicitar-codigo] rechazo: recuperar_password pero no tiene UID")
 		http.Error(w, "DNI inválido", http.StatusBadRequest)
 		return
 	}
 
 	codigo, err := generarCodigo()
 	if err != nil {
+		log.Printf("[solicitar-codigo] ERROR generando codigo: %v", err)
 		http.Error(w, "Error generando código", 500)
 		return
 	}
+	log.Printf("[solicitar-codigo] codigo generado ok")
 
 	_, err = FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Set(ctx, CodigoVerificacion{
 		Codigo:     codigo,
@@ -170,15 +172,18 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 		Verificado: false,
 	})
 	if err != nil {
+		log.Printf("[solicitar-codigo] ERROR guardando codigo en Firestore: %v", err)
 		http.Error(w, "Error guardando código", 500)
 		return
 	}
+	log.Printf("[solicitar-codigo] codigo guardado en Firestore ok")
 
 	if err := enviarCodigoPorMail(afiliado.Email, afiliado.Nombre, codigo); err != nil {
-		log.Printf("error enviando mail a %s: %v", afiliado.Email, err)
+		log.Printf("[solicitar-codigo] ERROR enviando mail a %q: %v", afiliado.Email, err)
 		http.Error(w, "Error enviando el código", 500)
 		return
 	}
+	log.Printf("[solicitar-codigo] mail enviado ok a %q", afiliado.Email)
 
 	respuestaGenerica["mailEnmascarado"] = enmascararMail(afiliado.Email)
 	w.Header().Set("Content-Type", "application/json")
@@ -262,20 +267,20 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JSON invalido", http.StatusBadRequest)
 		return
 	}
-if req.DNI == "" || req.Password == "" {
-	http.Error(w, "faltan datos", http.StatusBadRequest)
-	return
-}
+	if req.DNI == "" || req.Password == "" {
+		http.Error(w, "faltan datos", http.StatusBadRequest)
+		return
+	}
 
-if !reDNI.MatchString(req.DNI) {
-	http.Error(w, "DNI inválido", http.StatusBadRequest)
-	return
-}
+	if !reDNI.MatchString(req.DNI) {
+		http.Error(w, "DNI inválido", http.StatusBadRequest)
+		return
+	}
 
-if len(req.Password) < 8 {
-	http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
-	return
-}
+	if len(req.Password) < 8 {
+		http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
+		return
+	}
 
 	ctx := context.Background()
 
@@ -370,26 +375,26 @@ func CambiarPassword(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-	http.Error(w, "JSON invalido", http.StatusBadRequest)
-	return
-}
+		http.Error(w, "JSON invalido", http.StatusBadRequest)
+		return
+	}
 
-if req.DNI == "" || req.Password == "" {
-	http.Error(w, "faltan datos", http.StatusBadRequest)
-	return
-}
+	if req.DNI == "" || req.Password == "" {
+		http.Error(w, "faltan datos", http.StatusBadRequest)
+		return
+	}
 
-if !reDNI.MatchString(req.DNI) {
-	http.Error(w, "DNI inválido", http.StatusBadRequest)
-	return
-}
+	if !reDNI.MatchString(req.DNI) {
+		http.Error(w, "DNI inválido", http.StatusBadRequest)
+		return
+	}
 
-if len(req.Password) < 8 {
-	http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
-	return
-}
+	if len(req.Password) < 8 {
+		http.Error(w, "La contraseña debe tener al menos 8 caracteres", http.StatusBadRequest)
+		return
+	}
 
-ctx := context.Background()
+	ctx := context.Background()
 
 	// Mismo chequeo que CrearPassword: no confiamos en que el frontend
 	// "diga" que ya verificó el código, lo confirmamos contra Firestore.
