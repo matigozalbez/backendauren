@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
+	"sync"
+	"time"
 )
 
-// --- Nuevo: helper de geocoding ---
+var geoHTTPClient = &http.Client{Timeout: 8 * time.Second}
 
 type geocodeResponse struct {
 	Results []struct {
@@ -25,25 +28,43 @@ type geocodeResponse struct {
 	ErrorMessage string `json:"error_message"`
 }
 
+// geoCache guarda solo resultados exitosos para no repetir llamadas a la API.
+var geoCache sync.Map
+
 func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, err error) {
+	clave := strings.ToLower(strings.Join(strings.Fields(direccionCompleta), " "))
+	if val, ok := geoCache.Load(clave); ok {
+		coords := val.([]float64)
+		return coords[0], coords[1], nil
+	}
+
 	apiKey := os.Getenv("GOOGLE_API_KEY")
 	if apiKey == "" {
 		return 0, 0, fmt.Errorf("GOOGLE_API_KEY no configurada")
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s",
+		"https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s&components=country:AR",
 		url.QueryEscape(direccionCompleta),
 		apiKey,
 	)
 
-	resp, err := http.Get(endpoint)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	resp, err := geoHTTPClient.Do(req)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return 0, 0, fmt.Errorf("google geocoding respondió %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -60,12 +81,13 @@ func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, 
 			gr.ErrorMessage,
 		)
 	}
+
 	loc := gr.Results[0].Geometry.Location
+	geoCache.Store(clave, []float64{loc.Lat, loc.Lng})
 	return loc.Lat, loc.Lng, nil
 }
 
-// --- Nuevo: distancia entre dos coordenadas (Haversine) ---
-
+// distanciaKm devuelve la distancia en kilómetros entre dos coordenadas (Haversine).
 func distanciaKm(lat1, lng1, lat2, lng2 float64) float64 {
 	const radioTierraKm = 6371.0
 
@@ -76,6 +98,7 @@ func distanciaKm(lat1, lng1, lat2, lng2 float64) float64 {
 
 	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
 		math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(deltaLng/2)*math.Sin(deltaLng/2)
+	a = math.Min(a, 1)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
 	return radioTierraKm * c

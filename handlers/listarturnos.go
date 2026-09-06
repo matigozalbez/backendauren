@@ -31,6 +31,7 @@ type TurnoAdminView struct {
 	Direccion          string `json:"direccion"`
 	Motivo             string `json:"motivo"`
 	Estado             string `json:"estado"`
+	Modo               string `json:"modo"`
 	MedicoID           string `json:"medicoId,omitempty"`
 	MedicoNombre       string `json:"medicoNombre,omitempty"`
 	MedicoApellido     string `json:"medicoApellido,omitempty"`
