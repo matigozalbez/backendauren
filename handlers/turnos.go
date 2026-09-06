@@ -11,20 +11,21 @@ import (
 )
 
 type TurnoInput struct {
-	Especialidad string `json:"especialidad"`
-	Ciudad       string `json:"ciudad"`
-	Direccion    string `json:"direccion"`
-	Motivo       string `json:"motivo"`
+	Especialidad              string `json:"especialidad"`
+	Ciudad                    string `json:"ciudad"`
+	Direccion                 string `json:"direccion"`
+	Motivo                    string `json:"motivo"`
+	Modo                      string `json:"modo"` // "geolocalizado" o "profesional"
+	NombreProfesionalSugerido string `json:"nombreProfesionalSugerido"`
 
 	// Si es para un adherente, mandar su DNI. Si va vacío, el turno es para el titular.
 	AdherenteDni string `json:"adherenteDni"`
 }
-
 type Adherente struct {
-	Dni         string `firestore:"dni"`
-	Nombre      string `firestore:"nombre"`
-	Apellido    string `firestore:"apellido"`
-	Parentesco  string `firestore:"parentesco"`
+	Dni        string `firestore:"dni"`
+	Nombre     string `firestore:"nombre"`
+	Apellido   string `firestore:"apellido"`
+	Parentesco string `firestore:"parentesco"`
 }
 
 func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
@@ -51,10 +52,27 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		input.Especialidad = strings.TrimSpace(input.Especialidad)
 		input.Ciudad = strings.TrimSpace(input.Ciudad)
 		input.Direccion = strings.TrimSpace(input.Direccion)
+		input.Modo = strings.TrimSpace(input.Modo)
+		input.NombreProfesionalSugerido = strings.TrimSpace(input.NombreProfesionalSugerido)
 		input.AdherenteDni = strings.TrimSpace(input.AdherenteDni)
 
-		if input.Especialidad == "" || input.Ciudad == "" || input.Direccion == "" {
+		if input.Especialidad == "" || input.Ciudad == "" {
 			http.Error(w, "faltan datos", http.StatusBadRequest)
+			return
+		}
+
+		if input.Modo != "geolocalizado" && input.Modo != "profesional" {
+			http.Error(w, "modo inválido, debe ser 'geolocalizado' o 'profesional'", http.StatusBadRequest)
+			return
+		}
+
+		if input.Modo == "geolocalizado" && input.Direccion == "" {
+			http.Error(w, "falta la dirección para buscar por cercanía", http.StatusBadRequest)
+			return
+		}
+
+		if input.Modo == "profesional" && input.NombreProfesionalSugerido == "" {
+			http.Error(w, "falta el nombre del profesional", http.StatusBadRequest)
 			return
 		}
 
@@ -109,19 +127,21 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		doc := fsClient.Collection("turnos").NewDoc()
 
 		_, err = doc.Set(ctx, map[string]interface{}{
-			"uid":                 uid,
-			"socioDni":            socioDni,
-			"socioEmail":           socioEmail,
-			"solicitadoPor":       nombreCompleto,
-			"esParaAdherente":     esParaAdherente,
-			"beneficiarioDni":     beneficiarioDni,
-			"beneficiarioNombre":  beneficiarioNombre,
-			"especialidad":        input.Especialidad,
-			"ciudad":              input.Ciudad,
-			"direccion":           input.Direccion,
-			"motivo":              input.Motivo,
-			"estado":              "pendiente",
-			"creadoEn":            firestore.ServerTimestamp,
+			"uid":                       uid,
+			"socioDni":                  socioDni,
+			"socioEmail":                socioEmail,
+			"solicitadoPor":             nombreCompleto,
+			"esParaAdherente":           esParaAdherente,
+			"beneficiarioDni":           beneficiarioDni,
+			"beneficiarioNombre":        beneficiarioNombre,
+			"especialidad":              input.Especialidad,
+			"ciudad":                    input.Ciudad,
+			"direccion":                 input.Direccion,
+			"motivo":                    input.Motivo,
+			"modo":                      input.Modo,
+			"nombreProfesionalSugerido": input.NombreProfesionalSugerido,
+			"estado":                    "pendiente",
+			"creadoEn":                  firestore.ServerTimestamp,
 		})
 		if err != nil {
 			http.Error(w, "error al pedir el turno", http.StatusInternalServerError)
@@ -135,6 +155,3 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		})
 	}
 }
-
-
-

@@ -4,8 +4,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -69,6 +71,8 @@ type SocioInput struct {
 	Estado                string           `json:"estado"`
 	Adherentes            []AdherenteInput `json:"adherentes"`
 }
+
+var planColumnas = []string{"Auren Salud", "Auren Sepelio +", "Auren en Ruta", "Auren en Ruta +"}
 
 var (
 	reDNI    = regexp.MustCompile(`^\d{7,8}$`)
@@ -654,5 +658,138 @@ func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(historial)
+	}
+}
+
+func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		file, _, err := r.FormFile("archivo")
+		if err != nil {
+			http.Error(w, "archivo requerido (campo 'archivo')", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		reader := csv.NewReader(file)
+		reader.LazyQuotes = true
+
+		headers, err := reader.Read()
+		if err != nil {
+			http.Error(w, "no se pudo leer el header del CSV", http.StatusBadRequest)
+			return
+		}
+		headers[0] = strings.TrimPrefix(headers[0], "\ufeff") // BOM de Wix
+
+		colIdx := make(map[string]int)
+		for i, h := range headers {
+			colIdx[h] = i
+		}
+
+		ctx := context.Background()
+		bulkWriter := fsClient.BulkWriter(ctx)
+
+		procesados, omitidos := 0, 0
+		nuevosActivos, nuevosInactivos := 0, 0
+
+		for {
+			row, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				omitidos++
+				continue
+			}
+
+			get := func(col string) string {
+				if idx, ok := colIdx[col]; ok && idx < len(row) {
+					return strings.TrimSpace(row[idx])
+				}
+				return ""
+			}
+
+			dni := get("DNI")
+			nombre := get("Nombre")
+			apellido := get("Apellido")
+			email := strings.ToLower(get("Email"))
+
+			if !reDNI.MatchString(dni) || !reNombre.MatchString(nombre) || !reNombre.MatchString(apellido) {
+				log.Printf("fila omitida, datos inválidos: dni=%s nombre=%s", dni, nombre)
+				omitidos++
+				continue
+			}
+			if email != "" && !reEmail.MatchString(email) {
+				email = "" // preferí guardarlo vacío antes que romper el import por un mail mal cargado en Wix
+			}
+
+			var planesData []interface{}
+			for _, plan := range planColumnas {
+				if get(plan) == "true" {
+					planesData = append(planesData, map[string]interface{}{
+						"nombre": plan,
+						"estado": "activo",
+					})
+				}
+			}
+
+			estado := mapearEstado(get("Estado de Afiliación"))
+
+			socioDoc := map[string]interface{}{
+				"dni":       dni,
+				"nombre":    nombre,
+				"apellido":  apellido,
+				"email":     email,
+				"telefono":  get("Telefono"),
+				"direccion": get("Dirección"),
+				"planes":    planesData,
+				"estado":    estado,
+			}
+
+			ref := fsClient.Collection("socios").Doc(dni)
+			if _, err := bulkWriter.Set(ref, socioDoc, firestore.MergeAll); err != nil {
+				log.Printf("error encolando socio %s: %v", dni, err)
+				omitidos++
+				continue
+			}
+
+			procesados++
+			if estado == "activo" {
+				nuevosActivos++
+			} else if estado == "inactivo" {
+				nuevosInactivos++
+			}
+		}
+
+		bulkWriter.End()
+
+		// Nota: esto es un approach simplificado — recalcula sobre lo importado,
+		// no diferencia altas nuevas de actualizaciones de socios que ya existían
+		// con otro estado. Para stats 100% exactos habría que leer el estado previo
+		// de cada uno (lo cual reintroduce lecturas). A definir si les alcanza así.
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "ok",
+			"procesados": procesados,
+			"omitidos":   omitidos,
+		})
+	}
+}
+
+func mapearEstado(estadoWix string) string {
+	switch strings.ToLower(strings.TrimSpace(estadoWix)) {
+	case "activo", "activa":
+		return "activo"
+	case "inactivo", "inactiva":
+		return "inactivo"
+	case "suspendido", "suspendida":
+		return "suspendido"
+	default:
+		return "activo" // TODO: default hasta que confirmes los valores reales que exporta Wix
 	}
 }

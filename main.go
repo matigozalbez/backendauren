@@ -246,6 +246,15 @@ func main() {
 		middleware.RequireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
 	})
 
+	mux.HandleFunc("/api/admin/sugerir-medicos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.SugerirMedicosCercanos(firebase.Client))(w, r)
+	})
+
 	mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
@@ -369,6 +378,15 @@ func main() {
 			return
 		}
 		middleware.RequireAdmin(handlers.EstadisticasSocios)(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/importar-socios", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.ImportarSociosCSV(firebase.Client))(w, r)
 	})
 
 	mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
