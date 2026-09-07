@@ -241,11 +241,6 @@ func AsignarMedico(
 			input.TurnoID,
 		)
 
-		socioDni, _ := turnoData["socioDni"].(string)
-		beneficiarioDni, _ := turnoData["beneficiarioDni"].(string)
-		esParaAdherente, _ := turnoData["esParaAdherente"].(bool)
-		direccion, _ := turnoData["direccion"].(string)
-
 		fechaFinal, _ := turnoData["fecha"].(string)
 		if input.Fecha != "" {
 			fechaFinal = input.Fecha
@@ -257,23 +252,12 @@ func AsignarMedico(
 		}
 
 		_, err = fsClient.Collection("historial_turnos").Doc(input.TurnoID).Set(ctx, map[string]interface{}{
-			"turnoId":            input.TurnoID,
-			"uid":                uid,
-			"socioDni":           socioDni,
-			"beneficiarioDni":    beneficiarioDni,
-			"beneficiarioNombre": beneficiarioNombre,
-			"esParaAdherente":    esParaAdherente,
-			"especialidad":       especialidad,
-			"ciudad":             ciudad,
-			"direccion":          direccion,
-			"medicoId":           input.MedicoID,
-			"medicoNombre":       medicoNombre,
-			"medicoApellido":     medicoApellido,
-			"medicoDireccion":    medicoDireccion,
-			"fecha":              fechaFinal,
-			"hora":               horaFinal,
-			"estado":             "asignado",
-			"asignadoEn":         firestore.ServerTimestamp,
+			"uid":            uid,
+			"especialidad":   especialidad,
+			"medicoNombre":   medicoNombre,
+			"medicoApellido": medicoApellido,
+			"fecha":          fechaFinal,
+			"hora":           horaFinal,
 		})
 		if err != nil {
 			// No cortamos el flujo: el turno ya quedó asignado correctamente,

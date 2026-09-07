@@ -622,17 +622,8 @@ func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
-		q := fsClient.Collection("historial_turnos").Query
-
-		if estado := r.URL.Query().Get("estado"); estado != "" {
-			q = q.Where("estado", "==", estado)
-		}
-
-		if socioDni := r.URL.Query().Get("socioDni"); socioDni != "" {
-			q = q.Where("socioDni", "==", socioDni)
-		}
-
-		q = q.OrderBy("asignadoEn", firestore.Desc)
+		q := fsClient.Collection("historial_turnos").
+			OrderBy("fecha", firestore.Desc)
 
 		iter := q.Documents(ctx)
 		defer iter.Stop()

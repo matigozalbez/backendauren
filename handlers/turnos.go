@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -124,6 +126,18 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			beneficiarioNombre = strings.TrimSpace(encontrado.Nombre + " " + encontrado.Apellido)
 		}
 
+		// Geocodificamos la dirección del turno y la dejamos guardada en la
+		// colección "direcciones" (geocodificarDireccion persiste sola).
+		// No bloqueamos el alta: si falla, el turno se crea igual.
+		var latTurno, lngTurno float64
+		if input.Direccion != "" {
+			direccionCompleta := fmt.Sprintf("%s, %s", input.Direccion, input.Ciudad)
+			latTurno, lngTurno, err = geocodificarDireccion(direccionCompleta)
+			if err != nil {
+				log.Printf("WARNING: no se pudo geocodificar dirección del turno: %v", err)
+			}
+		}
+
 		doc := fsClient.Collection("turnos").NewDoc()
 
 		_, err = doc.Set(ctx, map[string]interface{}{
@@ -137,6 +151,8 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			"especialidad":              input.Especialidad,
 			"ciudad":                    input.Ciudad,
 			"direccion":                 input.Direccion,
+			"lat":                       latTurno,
+			"lng":                       lngTurno,
 			"motivo":                    input.Motivo,
 			"modo":                      input.Modo,
 			"nombreProfesionalSugerido": input.NombreProfesionalSugerido,

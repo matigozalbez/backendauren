@@ -293,6 +293,33 @@ func main() {
 		middleware.RequireAdmin(handlers.GeocodingStatsHandler)(w, r)
 	})
 
+	mux.HandleFunc("/api/direcciones/guardar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.GuardarDireccion(firebase.Client)(w, r)
+	})
+
+	mux.HandleFunc("/api/direcciones/buscar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.BuscarDirecciones(firebase.Client)(w, r)
+	})
+
+	mux.HandleFunc("/api/ciudades/buscar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.BuscarCiudades()(w, r)
+	})
+
 	mux.HandleFunc("/api/admin/asignar-medico", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
