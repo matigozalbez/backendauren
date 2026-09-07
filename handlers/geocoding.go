@@ -31,7 +31,35 @@ type geocodeResponse struct {
 // geoCache guarda solo resultados exitosos para no repetir llamadas a la API.
 var geoCache sync.Map
 
+// Contadores de uso real de la API de Geocoding (no incluyen hits de cache).
+var (
+	geoAPICalls        int64
+	geoAPICallsMu      sync.Mutex
+	geoLastRequest     time.Time
+	geoCodingProcessed int64
+)
+
+func GeocodingStatsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(GeoAPIStats())
+}
+
+// GeoAPIStats devuelve las estadísticas de uso real de la API de Geocoding.
+func GeoAPIStats() map[string]interface{} {
+	geoAPICallsMu.Lock()
+	defer geoAPICallsMu.Unlock()
+	return map[string]interface{}{
+		"api_calls_total": geoAPICalls,
+		"processed":       geoCodingProcessed,
+		"last_request_at": geoLastRequest.Format(time.RFC3339),
+	}
+}
+
 func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, err error) {
+	geoAPICallsMu.Lock()
+	geoCodingProcessed++
+	geoAPICallsMu.Unlock()
+
 	clave := strings.ToLower(strings.Join(strings.Fields(direccionCompleta), " "))
 	if val, ok := geoCache.Load(clave); ok {
 		coords := val.([]float64)
@@ -54,6 +82,12 @@ func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, 
 		return 0, 0, err
 	}
 
+	geoAPICallsMu.Lock()
+	geoAPICalls++
+	geoLastRequest = time.Now()
+	geoAPICallsMu.Unlock()
+
+	horaInicio := time.Now()
 	resp, err := geoHTTPClient.Do(req)
 	if err != nil {
 		return 0, 0, err
@@ -63,6 +97,9 @@ func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("google geocoding respondió %s", resp.Status)
 	}
+	duracion := time.Since(horaInicio)
+	fmt.Printf("[GEOCODING] llamada real a API #%d | %s | duración: %s\n",
+		geoAPICalls, direccionCompleta, duracion)
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

@@ -284,6 +284,15 @@ func main() {
 		middleware.RequireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
 	})
 
+	mux.HandleFunc("/api/admin/geocoding-stats", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.GeocodingStatsHandler)(w, r)
+	})
+
 	mux.HandleFunc("/api/admin/asignar-medico", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
