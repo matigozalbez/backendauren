@@ -64,7 +64,54 @@ func BuscarCiudades() http.HandlerFunc {
 			}
 		}
 
+		// L2: PostgreSQL geo_cache
+		if data, ok := PGCacheGet("ciudad_auto:" + clave); ok {
+			if itemsRaw, exists := data["items"].([]interface{}); exists {
+				items := make([]ciudadSugerencia, 0, len(itemsRaw))
+				for _, raw := range itemsRaw {
+					if m, ok := raw.(map[string]interface{}); ok {
+						item := ciudadSugerencia{Fuente: "ciudad"}
+						if v, ok := m["nombre"].(string); ok {
+							item.Nombre = v
+						}
+						if v, ok := m["description"].(string); ok {
+							item.Description = v
+						}
+						if v, ok := m["lat"].(float64); ok {
+							item.Lat = v
+						}
+						if v, ok := m["lng"].(float64); ok {
+							item.Lng = v
+						}
+						items = append(items, item)
+					}
+				}
+				ciudadesSugerenciasCache.Store(clave, ciudadesSugerenciaEntry{
+					items: items,
+					ok:    true,
+					ts:    time.Now(),
+				})
+				writeCiudadesResult(w, items)
+				return
+			}
+		}
+
 		items, valida := buscarCiudadesGoogle(q)
+		if valida && len(items) > 0 {
+			// Persistir en PG geo_cache
+			persistItems := make([]map[string]interface{}, 0, len(items))
+			for _, it := range items {
+				persistItems = append(persistItems, map[string]interface{}{
+					"nombre":      it.Nombre,
+					"description": it.Description,
+					"lat":         it.Lat,
+					"lng":         it.Lng,
+				})
+			}
+			PGCacheSet("ciudad_auto:"+clave, "ciudad_autocomplete", map[string]interface{}{
+				"items": persistItems,
+			})
+		}
 		ciudadesSugerenciasCache.Store(clave, ciudadesSugerenciaEntry{
 			items: items,
 			ok:    valida && len(items) > 0,

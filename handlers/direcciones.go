@@ -75,18 +75,14 @@ func GuardarDireccion(fsClient *firestore.Client) http.HandlerFunc {
 		}
 		direccionCompleta := strings.Join(parts, ", ")
 		norm := normalizarDireccion(direccionCompleta)
-		ctx := context.Background()
 
-		docRef := fsClient.Collection("direcciones").Doc(norm)
-		docSnap, err := docRef.Get(ctx)
-
-		if err == nil && docSnap.Exists() {
-			data := docSnap.Data()
+		// Buscar en PG geo_cache
+		if data, ok := PGCacheGet(norm); ok {
 			lat, _ := data["lat"].(float64)
 			lng, _ := data["lng"].(float64)
 			formattedAddr, _ := data["direccion"].(string)
 			if formattedAddr == "" {
-				formattedAddr, _ = data["formatted_address"].(string)
+				formattedAddr = direccionCompleta
 			}
 
 			geoCache.Store(norm, []float64{lat, lng})
@@ -107,12 +103,6 @@ func GuardarDireccion(fsClient *firestore.Client) http.HandlerFunc {
 			http.Error(w, "no se pudo geocodificar: "+errGeo.Error(), http.StatusUnprocessableEntity)
 			return
 		}
-
-		docRef.Set(ctx, map[string]interface{}{
-			"direccion": direccionCompleta,
-			"lat":       lat,
-			"lng":       lng,
-		})
 
 		geoAPICallsMu.Lock()
 		direccionesGuardadas++
@@ -171,37 +161,44 @@ func BuscarDirecciones(fsClient *firestore.Client) http.HandlerFunc {
 		ciudad := strings.TrimSpace(r.URL.Query().Get("ciudad"))
 
 		normQ := normalizarDireccion(q)
-		ctx := context.Background()
 		resultados := []buscarDireccionResult{}
 
-		// 1. Buscar en Firestore (prefix match por document ID)
-		iter := fsClient.Collection("direcciones").
-			Where(firestore.DocumentID, ">=", normQ).
-			Where(firestore.DocumentID, "<=", normQ+"\uf8ff").
-			Limit(5).
-			Documents(ctx)
+		// 1. Buscar en PG geo_cache (prefix match)
+		if PGPool != nil {
+			ctx := context.Background()
+			rows, err := PGPool.Query(ctx,
+				`SELECT cache_key, payload FROM geo_cache
+				 WHERE cache_key LIKE $1 || '%'
+				   AND tipo = 'geocoding'
+				 LIMIT 5`, normQ,
+			)
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var cacheKey string
+					var payload []byte
+					if err := rows.Scan(&cacheKey, &payload); err != nil {
+						continue
+					}
+					var data map[string]interface{}
+					if err := json.Unmarshal(payload, &data); err != nil {
+						continue
+					}
+					lat, _ := data["lat"].(float64)
+					lng, _ := data["lng"].(float64)
+					desc, _ := data["direccion"].(string)
+					if desc == "" {
+						desc = cacheKey
+					}
 
-		docs, err := iter.GetAll()
-		if err == nil {
-			for _, doc := range docs {
-				data := doc.Data()
-				lat, _ := data["lat"].(float64)
-				lng, _ := data["lng"].(float64)
-				desc, _ := data["direccion"].(string)
-				if desc == "" {
-					desc, _ = data["formatted_address"].(string)
+					resultados = append(resultados, buscarDireccionResult{
+						ID:          cacheKey,
+						Description: desc,
+						Lat:         lat,
+						Lng:         lng,
+						Fuente:      "pg",
+					})
 				}
-				if desc == "" {
-					desc = doc.Ref.ID
-				}
-
-				resultados = append(resultados, buscarDireccionResult{
-					ID:          doc.Ref.ID,
-					Description: desc,
-					Lat:         lat,
-					Lng:         lng,
-					Fuente:      "firestore",
-				})
 			}
 		}
 
@@ -213,15 +210,43 @@ func BuscarDirecciones(fsClient *firestore.Client) http.HandlerFunc {
 			}
 		}
 
-		// 2. Si no hay resultados locales, buscar en Google
+		// 2. Si no hay resultados locales, buscar en cache de place autocomplete
+		//    y si no, en Google.
 		if len(resultados) == 0 {
-			apiKey := os.Getenv("GOOGLE_PLACES_API_KEY")
-			if apiKey == "" {
-				apiKey = os.Getenv("GOOGLE_API_KEY")
+			// Los resultados del autocomplete dependen de la ciudad (strictbounds),
+			// así que la clave caché es q + ciudad.
+			consulta := q
+			if ciudad != "" {
+				consulta = q + ", " + ciudad
 			}
-			if apiKey != "" {
-				googleResults := buscarEnGoogle(q, ciudad, lat, lng, radio, apiKey)
-				resultados = append(resultados, googleResults...)
+			cacheKey := "place_auto:" + normalizarDireccion(consulta)
+
+			if data, ok := PGCacheGet(cacheKey); ok {
+				if itemsRaw, exists := data["items"].([]interface{}); exists {
+					for _, raw := range itemsRaw {
+						if m, ok := raw.(map[string]interface{}); ok {
+							item := buscarDireccionResult{Fuente: "cache"}
+							if v, ok := m["description"].(string); ok {
+								item.Description = v
+							}
+							if v, ok := m["place_id"].(string); ok {
+								item.PlaceID = v
+							}
+							resultados = append(resultados, item)
+						}
+					}
+				}
+			}
+
+			if len(resultados) == 0 {
+				apiKey := os.Getenv("GOOGLE_PLACES_API_KEY")
+				if apiKey == "" {
+					apiKey = os.Getenv("GOOGLE_API_KEY")
+				}
+				if apiKey != "" {
+					googleResults := buscarEnGoogle(q, ciudad, lat, lng, radio, apiKey)
+					resultados = append(resultados, googleResults...)
+				}
 			}
 		}
 
@@ -280,6 +305,21 @@ func buscarEnGoogle(input, ciudad string, lat, lng float64, radio int, apiKey st
 			Description: p.Description,
 			PlaceID:     p.PlaceID,
 			Fuente:      "google",
+		})
+	}
+
+	// Cacheamos las predicciones exitosas en PG geo_cache para no repetir
+	// llamadas pagadas al autocomplete de Places.
+	if len(resultados) > 0 {
+		persistItems := make([]map[string]interface{}, 0, len(resultados))
+		for _, it := range resultados {
+			persistItems = append(persistItems, map[string]interface{}{
+				"description": it.Description,
+				"place_id":    it.PlaceID,
+			})
+		}
+		PGCacheSet("place_auto:"+normalizarDireccion(consulta), "place_autocomplete", map[string]interface{}{
+			"items": persistItems,
 		})
 	}
 

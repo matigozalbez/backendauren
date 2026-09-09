@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -89,17 +88,11 @@ func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, 
 		return coords[0], coords[1], nil
 	}
 
-	// L2: Firestore
-	if FirestoreClient != nil {
-		ctx := context.Background()
-		docSnap, errGet := FirestoreClient.Collection("direcciones").Doc(clave).Get(ctx)
-		if errGet == nil && docSnap.Exists() {
-			data := docSnap.Data()
-			latFS, okLat := data["lat"].(float64)
-			lngFS, okLng := data["lng"].(float64)
-			if okLat && okLng {
-				coords := []float64{latFS, lngFS}
-				geoCache.Store(clave, coords)
+	// L2: PostgreSQL geo_cache
+	if data, ok := PGCacheGet(clave); ok {
+		if latFS, okLat := data["lat"].(float64); okLat {
+			if lngFS, okLng := data["lng"].(float64); okLng {
+				geoCache.Store(clave, []float64{latFS, lngFS})
 				return latFS, lngFS, nil
 			}
 		}
@@ -161,29 +154,15 @@ func geocodificarDireccion(direccionCompleta string) (lat float64, lng float64, 
 	loc := gr.Results[0].Geometry.Location
 	geoCache.Store(clave, []float64{loc.Lat, loc.Lng})
 
-	// Persistimos en Firestore para la próxima vez (best effort).
-	go func() {
-		defer func() { _ = recover() }()
-		if FirestoreClient == nil {
-			return
-		}
-		ctx := context.Background()
-		docRef := FirestoreClient.Collection("direcciones").Doc(clave)
-		docSnap, errGet := docRef.Get(ctx)
-		if errGet == nil && docSnap.Exists() {
-			return
-		}
-		_, errSet := docRef.Set(ctx, map[string]interface{}{
-			"direccion": direccionCompleta,
-			"lat":       loc.Lat,
-			"lng":       loc.Lng,
-		})
-		if errSet == nil {
-			geoAPICallsMu.Lock()
-			direccionesGuardadas++
-			geoAPICallsMu.Unlock()
-		}
-	}()
+	// Persistimos en PG geo_cache (best effort).
+	PGCacheSet(clave, "geocoding", map[string]interface{}{
+		"direccion": direccionCompleta,
+		"lat":       loc.Lat,
+		"lng":       loc.Lng,
+	})
+	geoAPICallsMu.Lock()
+	direccionesGuardadas++
+	geoAPICallsMu.Unlock()
 
 	return loc.Lat, loc.Lng, nil
 }
@@ -205,8 +184,8 @@ type ciudadCacheEntry struct {
 // ciudadesCache guarda solo en memoria para no escribir en Firestore.
 var ciudadesCache sync.Map
 
-// coordenadasCiudad devuelve centro y radio de una ciudad usando solo memoria.
-// Si la ciudad no existe, se recuerda 1h para no repetir llamadas.
+// coordenadasCiudad devuelve centro y radio de una ciudad.
+// Cache L1 en memoria, L2 en PostgreSQL geo_cache.
 func coordenadasCiudad(ciudad string) (ciudadInfo, error) {
 	clave := normalizarDireccion(ciudad)
 	if clave == "" || len(clave) < 3 || !esCiudadValida(clave) {
@@ -220,6 +199,24 @@ func coordenadasCiudad(ciudad string) (ciudadInfo, error) {
 		}
 		if time.Since(entry.ts) < time.Hour {
 			return ciudadInfo{}, fmt.Errorf("ciudad no ubicada recientemente")
+		}
+	}
+
+	// L2: PostgreSQL
+	if data, ok := PGCacheGet("ciudad:" + clave); ok {
+		info := ciudadInfo{}
+		if lat, ok := data["lat"].(float64); ok {
+			info.Lat = lat
+		}
+		if lng, ok := data["lng"].(float64); ok {
+			info.Lng = lng
+		}
+		if radio, ok := data["radio"].(float64); ok {
+			info.Radio = int(radio)
+		}
+		if info.Lat != 0 && info.Lng != 0 && info.Radio > 0 {
+			ciudadesCache.Store(clave, ciudadCacheEntry{info: info, ok: true, ts: time.Now()})
+			return info, nil
 		}
 	}
 
@@ -310,6 +307,14 @@ func geocodificarCiudad(ciudad, clave string) (ciudadInfo, error) {
 
 	info := ciudadInfo{Lat: loc.Lat, Lng: loc.Lng, Radio: radio}
 	ciudadesCache.Store(clave, ciudadCacheEntry{info: info, ok: true, ts: time.Now()})
+
+	// Persistir centro de ciudad en PG geo_cache
+	PGCacheSet("ciudad:"+clave, "ciudad_centro", map[string]interface{}{
+		"ciudad": ciudad,
+		"lat":    loc.Lat,
+		"lng":    loc.Lng,
+		"radio":  radio,
+	})
 
 	return info, nil
 }

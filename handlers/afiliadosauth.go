@@ -16,12 +16,14 @@ import (
 
 	"cloud.google.com/go/firestore"
 	firebaseauth "firebase.google.com/go/v4/auth"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // autenticar con Firebase Admin en el resto del backend)
 var (
 	FirestoreClient *firestore.Client
 	AuthClient      *firebaseauth.Client
+	PGPool          *pgxpool.Pool
 )
 
 var RESEND_API_KEY string

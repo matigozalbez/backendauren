@@ -13,7 +13,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/messaging"
-	"google.golang.org/api/iterator"
 )
 
 // ---------- Listar turnos (admin) ----------
@@ -36,12 +35,15 @@ type TurnoAdminView struct {
 	MedicoNombre       string `json:"medicoNombre,omitempty"`
 	MedicoApellido     string `json:"medicoApellido,omitempty"`
 	MedicoDireccion    string `json:"medicoDireccion,omitempty"`
+	ClinicaID          string `json:"clinicaId,omitempty"`
+	ClinicaNombre      string `json:"clinicaNombre,omitempty"`
+	ClinicaDireccion   string `json:"clinicaDireccion,omitempty"`
 	Fecha              string `json:"fecha,omitempty"`
 	Hora               string `json:"hora,omitempty"`
 }
 
 // requireAdmin ya se aplica como middleware en main.go, así que acá no se vuelve a chequear.
-func ListarTurnos(fsClient *firestore.Client) http.HandlerFunc {
+func ListarTurnos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -50,42 +52,42 @@ func ListarTurnos(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
 
-query := fsClient.Collection("turnos").OrderBy("creadoEn", firestore.Desc)
+		query := `SELECT id::text, uid, socio_dni, solicitado_por,
+			es_para_adherente, beneficiario_dni, beneficiario_nombre,
+			especialidad, ciudad, direccion, motivo, estado, modo,
+			COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
+			COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
+			COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
+			FROM turnos`
 
-if estado := r.URL.Query().Get("estado"); estado != "" {
-	query = fsClient.Collection("turnos").
-		Where("estado", "==", estado).
-		OrderBy("creadoEn", firestore.Desc)
-}
+		if estado := r.URL.Query().Get("estado"); estado != "" {
+			query += ` WHERE estado = '` + strings.ReplaceAll(estado, "'", "''") + `' ORDER BY creado_en DESC`
+		} else {
+			query += ` ORDER BY creado_en DESC`
+		}
 
-		iter := query.Documents(ctx)
-		defer iter.Stop()
+		rows, err := PGPool.Query(ctx, query)
+		if err != nil {
+			log.Printf("ERROR LEYENDO TURNOS: %v", err)
+			http.Error(w, "error leyendo turnos: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
 
 		turnos := make([]TurnoAdminView, 0)
-		for {
-			doc, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
-if err != nil {
-    log.Printf("ERROR LEYENDO TURNOS: %v", err)
-
-    http.Error(
-        w,
-        "error leyendo turnos: "+err.Error(),
-        http.StatusInternalServerError,
-    )
-
-    return
-}
-
+		for rows.Next() {
 			var t TurnoAdminView
-			data := doc.Data()
-			b, _ := json.Marshal(data)
-			_ = json.Unmarshal(b, &t)
-			t.ID = doc.Ref.ID
+			if err := rows.Scan(&t.ID, &t.Uid, &t.SocioDni, &t.SolicitadoPor,
+				&t.EsParaAdherente, &t.BeneficiarioDni, &t.BeneficiarioNombre,
+				&t.Especialidad, &t.Ciudad, &t.Direccion, &t.Motivo, &t.Estado, &t.Modo,
+				&t.MedicoID, &t.MedicoNombre, &t.MedicoApellido, &t.MedicoDireccion,
+				&t.Fecha, &t.Hora,
+				&t.ClinicaID, &t.ClinicaNombre, &t.ClinicaDireccion); err != nil {
+				continue
+			}
 			turnos = append(turnos, t)
 		}
 
@@ -131,20 +133,28 @@ func AsignarMedico(
 		ctx := context.Background()
 
 		// =========================================================
-		// 1. BUSCAR TURNO
+		// 1. BUSCAR TURNO (ahora en PostgreSQL)
 		// =========================================================
 
-		turnoRef := fsClient.Collection("turnos").Doc(input.TurnoID)
+		turnoCtx, cancelTurno := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelTurno()
 
-		turnoSnap, err := turnoRef.Get(ctx)
+		var uid, socioEmail, beneficiarioNombre, especialidad, ciudad, estadoActual string
+		var fechaActual, horaActual string
+		err := PGPool.QueryRow(turnoCtx, `
+			SELECT uid, COALESCE(socio_email,''), COALESCE(beneficiario_nombre,''),
+				   COALESCE(especialidad,''), COALESCE(ciudad,''), estado,
+				   COALESCE(fecha,''), COALESCE(hora,'')
+			FROM turnos WHERE id::text = $1`,
+			input.TurnoID,
+		).Scan(&uid, &socioEmail, &beneficiarioNombre, &especialidad, &ciudad,
+			&estadoActual, &fechaActual, &horaActual)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
 		}
 
-		turnoData := turnoSnap.Data()
-
-		if estadoActual, _ := turnoData["estado"].(string); estadoActual == "cancelado" {
+		if estadoActual == "cancelado" {
 			http.Error(
 				w,
 				"no se puede asignar un turno cancelado",
@@ -152,13 +162,6 @@ func AsignarMedico(
 			)
 			return
 		}
-
-		// Datos del usuario que solicitó el turno
-		uid, _ := turnoData["uid"].(string)
-		socioEmail, _ := turnoData["socioEmail"].(string)
-		beneficiarioNombre, _ := turnoData["beneficiarioNombre"].(string)
-		especialidad, _ := turnoData["especialidad"].(string)
-		ciudad, _ := turnoData["ciudad"].(string)
 
 		log.Printf(
 			"ASIGNANDO TURNO id=%s uid=%s email=%s beneficiario=%s",
@@ -169,59 +172,73 @@ func AsignarMedico(
 		)
 
 		// =========================================================
-		// 2. BUSCAR MÉDICO
+		// 2. BUSCAR MÉDICO (desde PostgreSQL)
 		// =========================================================
 
-		medicoSnap, err := fsClient.
-			Collection("medicos").
-			Doc(input.MedicoID).
-			Get(ctx)
+		var medicoNombre, medicoApellido, medicoDireccion, medicoCiudad, medicoProvincia string
+		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		err = PGPool.QueryRow(queryCtx,
+			`SELECT nombre, apellido, direccion, ciudad, provincia FROM medicos WHERE dni = $1`,
+			input.MedicoID,
+		).Scan(&medicoNombre, &medicoApellido, &medicoDireccion, &medicoCiudad, &medicoProvincia)
 
 		if err != nil {
 			http.Error(w, "médico no encontrado", http.StatusNotFound)
 			return
 		}
 
-		medicoData := medicoSnap.Data()
-
-		medicoNombre, _ := medicoData["nombre"].(string)
-		medicoApellido, _ := medicoData["apellido"].(string)
-		medicoDireccion, _ := medicoData["direccion"].(string)
-
-		// =========================================================
-		// 3. ACTUALIZAR TURNO
-		// =========================================================
-
-		updates := []firestore.Update{
-			{Path: "estado", Value: "asignado"},
-			{Path: "medicoId", Value: input.MedicoID},
-			{Path: "medicoNombre", Value: medicoNombre},
-			{Path: "medicoApellido", Value: medicoApellido},
-			{Path: "medicoDireccion", Value: medicoDireccion},
-			{Path: "asignadoEn", Value: firestore.ServerTimestamp},
+		// Guardamos la dirección COMPLETA del médico (calle, ciudad y provincia).
+		// La app usa este campo para "cómo llegar": si solo guardás la calle,
+		// Google Maps busca la dirección en la ciudad del turno (que es la del
+		// socio) y nunca encuentra al consultorio (ej. médico en San José del
+		// Rincón y turno creado en Santa Fe).
+		partesDir := []string{medicoDireccion, medicoCiudad, medicoProvincia}
+		partesFiltradas := make([]string, 0, len(partesDir))
+		for _, p := range partesDir {
+			if strings.TrimSpace(p) != "" {
+				partesFiltradas = append(partesFiltradas, strings.TrimSpace(p))
+			}
 		}
+		medicoDireccion = strings.Join(partesFiltradas, ", ")
 
+		// =========================================================
+		// 3. ACTUALIZAR TURNO (PostgreSQL)
+		// =========================================================
+
+		updCtx, cancelUpd := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelUpd()
+
+		fechaFinal := fechaActual
 		if input.Fecha != "" {
-			updates = append(
-				updates,
-				firestore.Update{
-					Path:  "fecha",
-					Value: input.Fecha,
-				},
-			)
+			fechaFinal = input.Fecha
 		}
-
+		horaFinal := horaActual
 		if input.Hora != "" {
-			updates = append(
-				updates,
-				firestore.Update{
-					Path:  "hora",
-					Value: input.Hora,
-				},
-			)
+			horaFinal = input.Hora
 		}
 
-		if _, err := turnoRef.Update(ctx, updates); err != nil {
+		_, err = PGPool.Exec(updCtx, `
+			UPDATE turnos SET
+				estado = 'asignado',
+				medico_id = $2,
+				medico_nombre = $3,
+				medico_apellido = $4,
+				medico_direccion = $5,
+				fecha = $6,
+				hora = $7,
+				asignado_en = NOW()
+			WHERE id::text = $1`,
+			input.TurnoID,
+			input.MedicoID,
+			medicoNombre,
+			medicoApellido,
+			medicoDireccion,
+			fechaFinal,
+			horaFinal,
+		)
+		if err != nil {
 			log.Printf(
 				"ERROR actualizando turno %s: %v",
 				input.TurnoID,
@@ -241,24 +258,22 @@ func AsignarMedico(
 			input.TurnoID,
 		)
 
-		fechaFinal, _ := turnoData["fecha"].(string)
-		if input.Fecha != "" {
-			fechaFinal = input.Fecha
-		}
+		// Guardamos el historial en PostgreSQL (no se escribe más en Firestore).
+		histCtx, cancelHist := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelHist()
 
-		horaFinal, _ := turnoData["hora"].(string)
-		if input.Hora != "" {
-			horaFinal = input.Hora
-		}
-
-		_, err = fsClient.Collection("historial_turnos").Doc(input.TurnoID).Set(ctx, map[string]interface{}{
-			"uid":            uid,
-			"especialidad":   especialidad,
-			"medicoNombre":   medicoNombre,
-			"medicoApellido": medicoApellido,
-			"fecha":          fechaFinal,
-			"hora":           horaFinal,
-		})
+		_, err = PGPool.Exec(histCtx, `
+			INSERT INTO historial_turnos (
+				turno_id, uid, especialidad, medico_nombre, medico_apellido, fecha, hora
+			) VALUES ((SELECT id FROM turnos WHERE id::text = $1), $2, $3, $4, $5, $6, $7)`,
+			input.TurnoID,
+			uid,
+			especialidad,
+			medicoNombre,
+			medicoApellido,
+			fechaFinal,
+			horaFinal,
+		)
 		if err != nil {
 			// No cortamos el flujo: el turno ya quedó asignado correctamente,
 			// esto es solo el registro de historial para el admin.
@@ -341,10 +356,10 @@ func AsignarMedico(
 				socioEmail,
 				beneficiarioNombre,
 				especialidad,
+				"Dr.",
 				medicoNombre,
 				medicoApellido,
 				medicoDireccion,
-				ciudad,
 				input.Fecha,
 				input.Hora,
 			)
@@ -386,10 +401,10 @@ func enviarEmailTurnoAsignado(
 	destinatario string,
 	nombre string,
 	especialidad string,
-	medicoNombre string,
-	medicoApellido string,
-	medicoDireccion string,
-	ciudad string,
+	profesionalTitulo string,
+	profesionalNombre string,
+	profesionalApellido string,
+	profesionalDireccion string,
 	fecha string,
 	hora string,
 ) error {
@@ -398,6 +413,8 @@ func enviarEmailTurnoAsignado(
 		"DEBUG: enviando email de turno asignado a=%q",
 		destinatario,
 	)
+
+	profesional := strings.TrimSpace(profesionalTitulo + " " + profesionalNombre + " " + profesionalApellido)
 
 	html := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
@@ -428,7 +445,7 @@ func enviarEmailTurnoAsignado(
 
 				<p>
 					<strong>Profesional:</strong><br>
-					Dr. %s %s
+					%s
 				</p>
 
 				<p>
@@ -443,7 +460,6 @@ func enviarEmailTurnoAsignado(
 
 				<p>
 					<strong>Dirección:</strong><br>
-					%s<br>
 					%s
 				</p>
 
@@ -458,12 +474,10 @@ func enviarEmailTurnoAsignado(
 	`,
 		nombre,
 		especialidad,
-		medicoNombre,
-		medicoApellido,
+		profesional,
 		fecha,
 		hora,
-		medicoDireccion,
-		ciudad,
+		profesionalDireccion,
 	)
 
 	payload := map[string]interface{}{

@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
-	"google.golang.org/api/iterator"
 )
 
 func MisTurnos(
-	fsClient *firestore.Client,
 	authClient *auth.Client,
 ) http.HandlerFunc {
 
@@ -61,82 +59,47 @@ func MisTurnos(
 			uid,
 		)
 
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
 
-		log.Printf(
-			"MIS TURNOS: consultando Firestore para uid=%s",
+		rows, err := PGPool.Query(ctx, `
+			SELECT id::text, uid, socio_dni, solicitado_por,
+				   es_para_adherente, beneficiario_dni, beneficiario_nombre,
+				   especialidad, ciudad, direccion, motivo, estado, modo,
+				   COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
+				   COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
+				   COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
+			FROM turnos WHERE uid = $1
+			ORDER BY creado_en DESC`,
 			uid,
 		)
-
-		query := fsClient.
-			Collection("turnos").
-			Where("uid", "==", uid).
-			OrderBy("creadoEn", firestore.Desc)
-
-		iter := query.Documents(ctx)
-
-		defer iter.Stop()
+		if err != nil {
+			log.Printf("MIS TURNOS: ERROR PG: %v", err)
+			http.Error(w, "error leyendo tus turnos: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
 
 		turnos := make([]TurnoAdminView, 0)
 
-		for {
+		for rows.Next() {
 
-			doc, err := iter.Next()
+			var turno TurnoAdminView
 
-			if err == iterator.Done {
-				break
-			}
-
-			if err != nil {
-
-				log.Printf(
-					"MIS TURNOS: ERROR FIRESTORE: %v",
-					err,
-				)
-
-				http.Error(
-					w,
-					"error leyendo tus turnos: "+err.Error(),
-					http.StatusInternalServerError,
-				)
-
-				return
+			if err := rows.Scan(&turno.ID, &turno.Uid, &turno.SocioDni, &turno.SolicitadoPor,
+				&turno.EsParaAdherente, &turno.BeneficiarioDni, &turno.BeneficiarioNombre,
+				&turno.Especialidad, &turno.Ciudad, &turno.Direccion, &turno.Motivo, &turno.Estado, &turno.Modo,
+				&turno.MedicoID, &turno.MedicoNombre, &turno.MedicoApellido, &turno.MedicoDireccion,
+				&turno.Fecha, &turno.Hora,
+				&turno.ClinicaID, &turno.ClinicaNombre, &turno.ClinicaDireccion); err != nil {
+				log.Printf("MIS TURNOS: error scan turno: %v", err)
+				continue
 			}
 
 			log.Printf(
 				"MIS TURNOS: turno encontrado: %s",
-				doc.Ref.ID,
+				turno.ID,
 			)
-
-			var turno TurnoAdminView
-
-			data := doc.Data()
-
-			b, err := json.Marshal(data)
-
-			if err != nil {
-
-				log.Printf(
-					"MIS TURNOS: error marshal turno %s: %v",
-					doc.Ref.ID,
-					err,
-				)
-
-				continue
-			}
-
-			if err := json.Unmarshal(b, &turno); err != nil {
-
-				log.Printf(
-					"MIS TURNOS: error unmarshal turno %s: %v",
-					doc.Ref.ID,
-					err,
-				)
-
-				continue
-			}
-
-			turno.ID = doc.Ref.ID
 
 			turnos = append(turnos, turno)
 		}

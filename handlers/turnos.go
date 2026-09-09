@@ -3,13 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type TurnoInput struct {
@@ -45,6 +48,17 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
+		// Cupo: 1 turno por mes calendario por cuenta (uid). Los cancelados no cuentan.
+		usoCtx, cancelUso := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelUso()
+		usados, errUso := turnosUsadosEnMes(usoCtx, uid)
+		if errUso != nil {
+			log.Printf("ERROR verificando cupo del mes para %s: %v", uid, errUso)
+		} else if usados >= 1 {
+			responderSinCupo(w)
+			return
+		}
+
 		var input TurnoInput
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -77,6 +91,9 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			http.Error(w, "falta el nombre del profesional", http.StatusBadRequest)
 			return
 		}
+
+		// El socio se lee de Firestore (datos sensibles que NO migran a PG).
+		// El turno en cambio se guarda en PostgreSQL.
 
 		ctx := context.Background()
 
@@ -126,9 +143,8 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			beneficiarioNombre = strings.TrimSpace(encontrado.Nombre + " " + encontrado.Apellido)
 		}
 
-		// Geocodificamos la dirección del turno y la dejamos guardada en la
-		// colección "direcciones" (geocodificarDireccion persiste sola).
-		// No bloqueamos el alta: si falla, el turno se crea igual.
+		// Geocodificamos la dirección del turno (geocodificarDireccion persiste
+		// en geo_cache de PG). No bloqueamos el alta: si falla, el turno se crea igual.
 		var latTurno, lngTurno float64
 		if input.Direccion != "" {
 			direccionCompleta := fmt.Sprintf("%s, %s", input.Direccion, input.Ciudad)
@@ -138,36 +154,116 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			}
 		}
 
-		doc := fsClient.Collection("turnos").NewDoc()
+		// El turno ahora vive en PostgreSQL.
+		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 
-		_, err = doc.Set(ctx, map[string]interface{}{
-			"uid":                       uid,
-			"socioDni":                  socioDni,
-			"socioEmail":                socioEmail,
-			"solicitadoPor":             nombreCompleto,
-			"esParaAdherente":           esParaAdherente,
-			"beneficiarioDni":           beneficiarioDni,
-			"beneficiarioNombre":        beneficiarioNombre,
-			"especialidad":              input.Especialidad,
-			"ciudad":                    input.Ciudad,
-			"direccion":                 input.Direccion,
-			"lat":                       latTurno,
-			"lng":                       lngTurno,
-			"motivo":                    input.Motivo,
-			"modo":                      input.Modo,
-			"nombreProfesionalSugerido": input.NombreProfesionalSugerido,
-			"estado":                    "pendiente",
-			"creadoEn":                  firestore.ServerTimestamp,
-		})
+		var turnoID string
+		err = PGPool.QueryRow(queryCtx, `
+			INSERT INTO turnos (
+				uid, socio_dni, socio_email, solicitado_por,
+				es_para_adherente, beneficiario_dni, beneficiario_nombre,
+				especialidad, ciudad, direccion, lat, lng, motivo, modo,
+				nombre_profesional_sugerido, estado
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pendiente')
+			RETURNING id::text`,
+			uid,
+			socioDni,
+			socioEmail,
+			nombreCompleto,
+			esParaAdherente,
+			beneficiarioDni,
+			beneficiarioNombre,
+			input.Especialidad,
+			input.Ciudad,
+			input.Direccion,
+			latTurno,
+			lngTurno,
+			input.Motivo,
+			input.Modo,
+			input.NombreProfesionalSugerido,
+		).Scan(&turnoID)
 		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				// Violación del índice único ux_turnos_uid_mes: doble envío en el mismo mes.
+				responderSinCupo(w)
+				return
+			}
+			log.Printf("ERROR al crear turno en PostgreSQL: %v", err)
 			http.Error(w, "error al pedir el turno", http.StatusInternalServerError)
 			return
 		}
 
+		log.Printf("TURNO CREADO en PostgreSQL id=%s uid=%s", turnoID, uid)
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
-			"id":     doc.ID,
+			"id":     turnoID,
+		})
+	}
+}
+
+// turnosUsadosEnMes cuenta los turnos del mes calendario actual para una cuenta
+// (uid), excluyendo los cancelados. El mes se renueva el día 1 de cada mes.
+func turnosUsadosEnMes(ctx context.Context, uid string) (int, error) {
+	var usados int
+	err := PGPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM turnos
+		WHERE uid = $1
+		  AND estado <> 'cancelado'
+		  AND creado_en >= date_trunc('month', CURRENT_TIMESTAMP)`,
+		uid,
+	).Scan(&usados)
+	return usados, err
+}
+
+// responderSinCupo responde el 429 con mensaje claro para la app.
+func responderSinCupo(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "error",
+		"codigo":  "TURNO_MES_AGOTADO",
+		"mensaje": "Ya utilizaste tu turno de este mes. Hay disponibilidad desde el 1º del próximo mes.",
+	})
+}
+
+// MisTurnosCupo informa al socio si puede o no pedir un turno en el mes.
+func MisTurnosCupo(authClient *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		uid, err := verifyIDToken(r, authClient)
+		if err != nil {
+			http.Error(w, "no autorizado, iniciá sesión", http.StatusUnauthorized)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		usados, err := turnosUsadosEnMes(ctx, uid)
+		if err != nil {
+			log.Printf("ERROR leyendo cupo de %s: %v", uid, err)
+			http.Error(w, "error leyendo cupo", http.StatusInternalServerError)
+			return
+		}
+
+		proximoMes := time.Now().AddDate(0, 1, 0)
+		inicioProximo := time.Date(proximoMes.Year(), proximoMes.Month(), 1, 0, 0, 0, 0, time.Local)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"usado":      usados,
+			"mensual":    1,
+			"habilitado": usados < 1,
+			"proximoMes": inicioProximo.Format("2006-01-02"),
 		})
 	}
 }

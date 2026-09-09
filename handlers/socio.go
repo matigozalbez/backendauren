@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -20,7 +21,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
-	"google.golang.org/api/iterator"
 )
 
 type HistorialAdminView struct {
@@ -36,6 +36,7 @@ type HistorialAdminView struct {
 	MedicoNombre       string `json:"medicoNombre"`
 	MedicoApellido     string `json:"medicoApellido"`
 	MedicoDireccion    string `json:"medicoDireccion"`
+	ClinicaNombre      string `json:"clinicaNombre"`
 	Fecha              string `json:"fecha"`
 	Hora               string `json:"hora"`
 	Estado             string `json:"estado"`
@@ -611,7 +612,7 @@ func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
 		})
 	}
 }
-func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
+func ListarHistorial() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -620,31 +621,31 @@ func ListarHistorial(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
 
-		q := fsClient.Collection("historial_turnos").
-			OrderBy("fecha", firestore.Desc)
-
-		iter := q.Documents(ctx)
-		defer iter.Stop()
+		rows, err := PGPool.Query(ctx, `
+			SELECT id::text, COALESCE(turno_id::text,''), COALESCE(uid,''),
+				   COALESCE(especialidad,''), COALESCE(medico_nombre,''),
+				   COALESCE(medico_apellido,''), COALESCE(fecha,''), COALESCE(hora,''),
+				   COALESCE(clinica_nombre,'')
+			FROM historial_turnos
+			ORDER BY creado_en DESC`)
+		if err != nil {
+			log.Printf("ERROR LEYENDO HISTORIAL: %v", err)
+			http.Error(w, "error leyendo historial: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
 
 		historial := make([]HistorialAdminView, 0)
-		for {
-			doc, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				log.Printf("ERROR LEYENDO HISTORIAL: %v", err)
-				http.Error(w, "error leyendo historial: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-
+		for rows.Next() {
 			var h HistorialAdminView
-			data := doc.Data()
-			b, _ := json.Marshal(data)
-			_ = json.Unmarshal(b, &h)
-			h.ID = doc.Ref.ID
+			var uidIgnored string
+			if err := rows.Scan(&h.ID, &h.TurnoID, &uidIgnored, &h.Especialidad,
+				&h.MedicoNombre, &h.MedicoApellido, &h.Fecha, &h.Hora, &h.ClinicaNombre); err != nil {
+				continue
+			}
 			historial = append(historial, h)
 		}
 

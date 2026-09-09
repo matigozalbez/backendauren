@@ -21,16 +21,16 @@ func main() {
 		log.Println("Aviso: No se encontro el archivo env")
 	}
 
-	if err := godotenv.Load(); err != nil {
-		log.Println("Aviso: No se encontro el archivo env")
-	}
-
 	handlers.InicializarConfig()
 
 	firebase.Init()
+	InitPG()
+	defer ClosePG()
+
 	mux := http.NewServeMux()
 	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
+	handlers.PGPool = PG
 	/*
 		if err := handlers.ReconstruirStats(firebase.Client); err != nil {
 			log.Fatal(err)
@@ -243,7 +243,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearMedico(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearMedico())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/sugerir-medicos", func(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +252,16 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.SugerirMedicosCercanos(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.SugerirMedicosCercanos())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/borrar-medico", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.BorrarMedico())(w, r)
 	})
 
 	mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +270,52 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.ListarMedicos(firebase.Client, firebase.AuthClient)(w, r)
+		middleware.RequireAdmin(handlers.ListarMedicos())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/crear-clinica", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.CrearClinica())(w, r)
+	})
+
+	mux.HandleFunc("/api/listar-clinicas", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.ListarClinicas())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/editar-clinica", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.EditarClinica())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/borrar-clinica", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.BorrarClinica())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/asignar-clinica", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.AsignarClinica(firebase.Client, firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +335,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarTurnos(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarTurnos())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/geocoding-stats", func(w http.ResponseWriter, r *http.Request) {
@@ -344,7 +398,20 @@ func main() {
 		}
 
 		handlers.MisTurnos(
-			firebase.Client,
+			firebase.AuthClient,
+		)(w, r)
+	})
+
+	mux.HandleFunc("/api/mis-turnos/cupo", func(w http.ResponseWriter, r *http.Request) {
+
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		handlers.MisTurnosCupo(
 			firebase.AuthClient,
 		)(w, r)
 	})
@@ -382,7 +449,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarHistorial(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarHistorial())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/servidor/metricas", func(w http.ResponseWriter, r *http.Request) {
