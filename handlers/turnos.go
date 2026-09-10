@@ -23,6 +23,10 @@ type TurnoInput struct {
 	Modo                      string `json:"modo"` // "geolocalizado" o "profesional"
 	NombreProfesionalSugerido string `json:"nombreProfesionalSugerido"`
 
+	// estudios: "consulta" (default) o "estudio"
+	Tipo      string `json:"tipo"`
+	ImagenURL string `json:"imagenUrl"`
+
 	// Si es para un adherente, mandar su DNI. Si va vacío, el turno es para el titular.
 	AdherenteDni string `json:"adherenteDni"`
 }
@@ -48,20 +52,30 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
-		// Cupo: 1 turno por mes calendario por cuenta (uid). Los cancelados no cuentan.
-		usoCtx, cancelUso := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancelUso()
-		usados, errUso := turnosUsadosEnMes(usoCtx, uid)
-		if errUso != nil {
-			log.Printf("ERROR verificando cupo del mes para %s: %v", uid, errUso)
-		} else if usados >= 1 {
-			responderSinCupo(w)
-			return
-		}
-
+		// Cupo: 1 turno por mes calendario por cuenta (uid) y por tipo.
+		// Los cancelados no cuentan. Estudios y consultas tienen cupos separados.
 		var input TurnoInput
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+
+		input.Tipo = strings.TrimSpace(input.Tipo)
+		if input.Tipo == "" {
+			input.Tipo = "consulta"
+		}
+		if input.Tipo != "consulta" && input.Tipo != "estudio" {
+			http.Error(w, "tipo inválido, debe ser 'consulta' o 'estudio'", http.StatusBadRequest)
+			return
+		}
+
+		usoCtx, cancelUso := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelUso()
+		usados, errUso := turnosUsadosEnMes(usoCtx, uid, input.Tipo)
+		if errUso != nil {
+			log.Printf("ERROR verificando cupo del mes para %s (%s): %v", uid, input.Tipo, errUso)
+		} else if usados >= 1 {
+			responderSinCupo(w, input.Tipo)
 			return
 		}
 
@@ -77,19 +91,33 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
-		if input.Modo != "geolocalizado" && input.Modo != "profesional" {
-			http.Error(w, "modo inválido, debe ser 'geolocalizado' o 'profesional'", http.StatusBadRequest)
-			return
-		}
+		if input.Tipo == "estudio" {
+			// Un estudio es geolocalizado como una consulta (ciudad + dirección),
+			// y el admin le deriva una clínica. Suma la foto obligatoria.
+			input.Modo = "geolocalizado"
+			if input.Direccion == "" {
+				http.Error(w, "falta la dirección para el estudio", http.StatusBadRequest)
+				return
+			}
+			if input.ImagenURL == "" {
+				http.Error(w, "falta la imagen del estudio", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if input.Modo != "geolocalizado" && input.Modo != "profesional" {
+				http.Error(w, "modo inválido, debe ser 'geolocalizado' o 'profesional'", http.StatusBadRequest)
+				return
+			}
 
-		if input.Modo == "geolocalizado" && input.Direccion == "" {
-			http.Error(w, "falta la dirección para buscar por cercanía", http.StatusBadRequest)
-			return
-		}
+			if input.Modo == "geolocalizado" && input.Direccion == "" {
+				http.Error(w, "falta la dirección para buscar por cercanía", http.StatusBadRequest)
+				return
+			}
 
-		if input.Modo == "profesional" && input.NombreProfesionalSugerido == "" {
-			http.Error(w, "falta el nombre del profesional", http.StatusBadRequest)
-			return
+			if input.Modo == "profesional" && input.NombreProfesionalSugerido == "" {
+				http.Error(w, "falta el nombre del profesional", http.StatusBadRequest)
+				return
+			}
 		}
 
 		// El socio se lee de Firestore (datos sensibles que NO migran a PG).
@@ -164,8 +192,8 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 				uid, socio_dni, socio_email, solicitado_por,
 				es_para_adherente, beneficiario_dni, beneficiario_nombre,
 				especialidad, ciudad, direccion, lat, lng, motivo, modo,
-				nombre_profesional_sugerido, estado
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pendiente')
+				nombre_profesional_sugerido, tipo, imagen_url, estado
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pendiente')
 			RETURNING id::text`,
 			uid,
 			socioDni,
@@ -182,12 +210,14 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			input.Motivo,
 			input.Modo,
 			input.NombreProfesionalSugerido,
+			input.Tipo,
+			input.ImagenURL,
 		).Scan(&turnoID)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				// Violación del índice único ux_turnos_uid_mes: doble envío en el mismo mes.
-				responderSinCupo(w)
+				// Violación del índice único ux_turnos_uid_mes_tipo: doble envío en el mismo mes.
+				responderSinCupo(w, input.Tipo)
 				return
 			}
 			log.Printf("ERROR al crear turno en PostgreSQL: %v", err)
@@ -195,7 +225,7 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
-		log.Printf("TURNO CREADO en PostgreSQL id=%s uid=%s", turnoID, uid)
+		log.Printf("TURNO CREADO en PostgreSQL id=%s uid=%s tipo=%s", turnoID, uid, input.Tipo)
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -206,27 +236,33 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 }
 
 // turnosUsadosEnMes cuenta los turnos del mes calendario actual para una cuenta
-// (uid), excluyendo los cancelados. El mes se renueva el día 1 de cada mes.
-func turnosUsadosEnMes(ctx context.Context, uid string) (int, error) {
+// (uid) y un tipo ('consulta' | 'estudio'), excluyendo los cancelados.
+// El mes se renueva el día 1 de cada mes.
+func turnosUsadosEnMes(ctx context.Context, uid string, tipo string) (int, error) {
 	var usados int
 	err := PGPool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM turnos
 		WHERE uid = $1
+		  AND tipo = $2
 		  AND estado <> 'cancelado'
 		  AND creado_en >= date_trunc('month', CURRENT_TIMESTAMP)`,
-		uid,
+		uid, tipo,
 	).Scan(&usados)
 	return usados, err
 }
 
 // responderSinCupo responde el 429 con mensaje claro para la app.
-func responderSinCupo(w http.ResponseWriter) {
+func responderSinCupo(w http.ResponseWriter, tipo string) {
+	label := "turno"
+	if tipo == "estudio" {
+		label = "estudio"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "error",
 		"codigo":  "TURNO_MES_AGOTADO",
-		"mensaje": "Ya utilizaste tu turno de este mes. Hay disponibilidad desde el 1º del próximo mes.",
+		"mensaje": fmt.Sprintf("Ya utilizaste tu %s de este mes. Hay disponibilidad desde el 1º del próximo mes.", label),
 	})
 }
 
@@ -246,10 +282,19 @@ func MisTurnosCupo(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
+		tipo := strings.TrimSpace(r.URL.Query().Get("tipo"))
+		if tipo == "" {
+			tipo = "consulta"
+		}
+		if tipo != "consulta" && tipo != "estudio" {
+			http.Error(w, "tipo inválido", http.StatusBadRequest)
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		usados, err := turnosUsadosEnMes(ctx, uid)
+		usados, err := turnosUsadosEnMes(ctx, uid, tipo)
 		if err != nil {
 			log.Printf("ERROR leyendo cupo de %s: %v", uid, err)
 			http.Error(w, "error leyendo cupo", http.StatusInternalServerError)

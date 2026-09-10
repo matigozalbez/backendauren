@@ -25,12 +25,14 @@ type TurnoAdminView struct {
 	EsParaAdherente    bool   `json:"esParaAdherente"`
 	BeneficiarioDni    string `json:"beneficiarioDni"`
 	BeneficiarioNombre string `json:"beneficiarioNombre"`
+	Tipo               string `json:"tipo"`
 	Especialidad       string `json:"especialidad"`
 	Ciudad             string `json:"ciudad"`
 	Direccion          string `json:"direccion"`
 	Motivo             string `json:"motivo"`
 	Estado             string `json:"estado"`
 	Modo               string `json:"modo"`
+	ImagenURL          string `json:"imagenUrl,omitempty"`
 	MedicoID           string `json:"medicoId,omitempty"`
 	MedicoNombre       string `json:"medicoNombre,omitempty"`
 	MedicoApellido     string `json:"medicoApellido,omitempty"`
@@ -57,7 +59,8 @@ func ListarTurnos() http.HandlerFunc {
 
 		query := `SELECT id::text, uid, socio_dni, solicitado_por,
 			es_para_adherente, beneficiario_dni, beneficiario_nombre,
-			especialidad, ciudad, direccion, motivo, estado, modo,
+			COALESCE(tipo,'consulta'), especialidad, ciudad, direccion, motivo, estado, modo,
+			COALESCE(imagen_url,''),
 			COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
 			COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
 			COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
@@ -82,7 +85,8 @@ func ListarTurnos() http.HandlerFunc {
 			var t TurnoAdminView
 			if err := rows.Scan(&t.ID, &t.Uid, &t.SocioDni, &t.SolicitadoPor,
 				&t.EsParaAdherente, &t.BeneficiarioDni, &t.BeneficiarioNombre,
-				&t.Especialidad, &t.Ciudad, &t.Direccion, &t.Motivo, &t.Estado, &t.Modo,
+				&t.Tipo, &t.Especialidad, &t.Ciudad, &t.Direccion, &t.Motivo, &t.Estado, &t.Modo,
+				&t.ImagenURL,
 				&t.MedicoID, &t.MedicoNombre, &t.MedicoApellido, &t.MedicoDireccion,
 				&t.Fecha, &t.Hora,
 				&t.ClinicaID, &t.ClinicaNombre, &t.ClinicaDireccion); err != nil {
@@ -353,6 +357,7 @@ func AsignarMedico(
 		if socioEmail != "" {
 
 			err := enviarEmailTurnoAsignado(
+				false,
 				socioEmail,
 				beneficiarioNombre,
 				especialidad,
@@ -398,6 +403,7 @@ func AsignarMedico(
 
 
 func enviarEmailTurnoAsignado(
+	esEstudio bool,
 	destinatario string,
 	nombre string,
 	especialidad string,
@@ -414,13 +420,18 @@ func enviarEmailTurnoAsignado(
 		destinatario,
 	)
 
+	palabra := "turno"
+	if esEstudio {
+		palabra = "estudio"
+	}
+
 	profesional := strings.TrimSpace(profesionalTitulo + " " + profesionalNombre + " " + profesionalApellido)
 
 	html := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
 
 			<h2 style="color:#0F1E3D;">
-				Tu turno fue asignado ✅
+				Tu %s fue asignado ✅
 			</h2>
 
 			<p>
@@ -428,7 +439,7 @@ func enviarEmailTurnoAsignado(
 			</p>
 
 			<p>
-				Tu solicitud de turno fue asignada correctamente.
+				Tu solicitud de %s fue asignada correctamente.
 			</p>
 
 			<div style="
@@ -466,18 +477,21 @@ func enviarEmailTurnoAsignado(
 			</div>
 
 			<p>
-				Podés consultar los detalles de tu turno
+				Podés consultar los detalles de tu %s
 				desde Auren.
 			</p>
 
 		</div>
 	`,
+		strings.ToUpper(palabra),
 		nombre,
+		palabra,
 		especialidad,
 		profesional,
 		fecha,
 		hora,
 		profesionalDireccion,
+		palabra,
 	)
 
 	payload := map[string]interface{}{
@@ -485,7 +499,7 @@ func enviarEmailTurnoAsignado(
 		"to": []string{
 			destinatario,
 		},
-		"subject": "Tu turno fue asignado - Auren",
+		"subject": fmt.Sprintf("Tu %s fue asignado - Auren", palabra),
 		"html":    html,
 	}
 

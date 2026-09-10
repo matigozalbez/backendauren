@@ -22,6 +22,7 @@ func main() {
 	}
 
 	handlers.InicializarConfig()
+	handlers.InicializarCloudinary()
 
 	firebase.Init()
 	InitPG()
@@ -386,6 +387,39 @@ func main() {
 				firebase.MessagingClient,
 			),
 		)(w, r)
+	})
+
+	mux.HandleFunc("/api/estudios/subir-imagen", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		handlers.SubirImagenEstudio(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/estudios", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		middleware.RequireAdmin(handlers.ListarEstudios())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/estudios/estado", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		middleware.RequireAdmin(handlers.CambiarEstadoEstudio())(w, r)
 	})
 
 	mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {

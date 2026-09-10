@@ -365,20 +365,22 @@ func AsignarClinica(
 		turnoCtx, cancelTurno := context.WithTimeout(ctx, 5*time.Second)
 		defer cancelTurno()
 
-		var uid, socioEmail, beneficiarioNombre, especialidad, ciudad, estadoActual string
+		var uid, socioEmail, beneficiarioNombre, especialidad, ciudad, estadoActual, tipoTurno string
 		var fechaActual, horaActual string
 		err := PGPool.QueryRow(turnoCtx, `
 			SELECT uid, COALESCE(socio_email,''), COALESCE(beneficiario_nombre,''),
 				   COALESCE(especialidad,''), COALESCE(ciudad,''), estado,
-				   COALESCE(fecha,''), COALESCE(hora,'')
+				   COALESCE(fecha,''), COALESCE(hora,''), COALESCE(tipo,'consulta')
 			FROM turnos WHERE id::text = $1`,
 			input.TurnoID,
 		).Scan(&uid, &socioEmail, &beneficiarioNombre, &especialidad, &ciudad,
-			&estadoActual, &fechaActual, &horaActual)
+			&estadoActual, &fechaActual, &horaActual, &tipoTurno)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
 		}
+
+		esEstudio := tipoTurno == "estudio"
 
 		if estadoActual == "cancelado" {
 			http.Error(w, "no se puede asignar un turno cancelado", http.StatusConflict)
@@ -404,25 +406,27 @@ func AsignarClinica(
 			return
 		}
 
-		espRows, err := PGPool.Query(queryCtx,
-			`SELECT especialidad FROM clinica_especialidades WHERE clinica_id = $1`,
-			input.ClinicaID,
-		)
-		if err != nil {
-			http.Error(w, "error obteniendo especialidades de la clínica", http.StatusInternalServerError)
-			return
-		}
-		defer espRows.Close()
-
-		matchea := false
-		for espRows.Next() {
-			var esp string
-			if err := espRows.Scan(&esp); err != nil {
-				continue
+		matchea := esEstudio
+		if !esEstudio {
+			espRows, err := PGPool.Query(queryCtx,
+				`SELECT especialidad FROM clinica_especialidades WHERE clinica_id = $1`,
+				input.ClinicaID,
+			)
+			if err != nil {
+				http.Error(w, "error obteniendo especialidades de la clínica", http.StatusInternalServerError)
+				return
 			}
-			if normalizarEspecialidad(esp) == normalizarEspecialidad(especialidad) {
-				matchea = true
-				break
+			defer espRows.Close()
+
+			for espRows.Next() {
+				var esp string
+				if err := espRows.Scan(&esp); err != nil {
+					continue
+				}
+				if normalizarEspecialidad(esp) == normalizarEspecialidad(especialidad) {
+					matchea = true
+					break
+				}
 			}
 		}
 		if !matchea {
@@ -516,14 +520,18 @@ func AsignarClinica(
 				tokenData := tokenSnap.Data()
 				token, _ := tokenData["token"].(string)
 				if token != "" {
+					palabra := "turno"
+					if esEstudio {
+						palabra = "estudio"
+					}
 					push := &messaging.Message{
 						Token: token,
 						Webpush: &messaging.WebpushConfig{
 							Notification: &messaging.WebpushNotification{
 								Title: "Turno asignado ✅",
 								Body: fmt.Sprintf(
-									"Tu turno de %s fue asignado en %s para el %s a las %s.",
-									especialidad, clinicaNombre, input.Fecha, input.Hora,
+									"Tu %s de %s fue asignado en %s para el %s a las %s.",
+									palabra, especialidad, clinicaNombre, input.Fecha, input.Hora,
 								),
 								Icon: "/icon-192.png",
 							},
@@ -540,6 +548,7 @@ func AsignarClinica(
 		// Email.
 		if socioEmail != "" {
 			err := enviarEmailTurnoAsignado(
+				esEstudio,
 				socioEmail,
 				beneficiarioNombre,
 				especialidad,

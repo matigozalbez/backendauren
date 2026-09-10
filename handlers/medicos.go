@@ -182,13 +182,13 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 		turnoCtx, cancelTurno := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelTurno()
 
-		var especialidad, direccionTurno, ciudadTurno string
+		var especialidad, direccionTurno, ciudadTurno, tipoTurno string
 		var latTurno, lngTurno float64
 		err := PGPool.QueryRow(turnoCtx, `
 			SELECT COALESCE(especialidad,''), COALESCE(lat,0), COALESCE(lng,0),
-				   COALESCE(direccion,''), COALESCE(ciudad,'')
+				   COALESCE(direccion,''), COALESCE(ciudad,''), COALESCE(tipo,'consulta')
 			FROM turnos WHERE id::text = $1`, turnoID).
-			Scan(&especialidad, &latTurno, &lngTurno, &direccionTurno, &ciudadTurno)
+			Scan(&especialidad, &latTurno, &lngTurno, &direccionTurno, &ciudadTurno, &tipoTurno)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
@@ -215,7 +215,13 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 
 		var resultado []SugerenciaLugar
 
-		// ── 1. MÉDICOS ──
+		// Un estudio se deriva SIEMPRE a una clínica: no sugerimos médicos
+		// y no filtramos clínicas por especialidad (el tipo de estudio no
+		// está entre las especialidades médicas).
+		esEstudio := tipoTurno == "estudio"
+
+		// ── 1. MÉDICOS (solo consultas) ──
+		if !esEstudio {
 		medRows, err := PGPool.Query(queryCtx,
 			`SELECT dni, nombre, apellido, especialidad, direccion, ciudad, provincia, lat, lng
 			 FROM medicos`)
@@ -265,6 +271,7 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 				})
 			}
 		}
+		}
 
 		// ── 2. CLÍNICAS ──
 		clinRows, err := PGPool.Query(queryCtx,
@@ -281,13 +288,16 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 				}
 
 				// Verificar que la clínica tenga la especialidad pedida.
+				// En estudios se saltea: el tipo de estudio no está entre las
+				// especialidades médicas, y el admin deriva cualquier clínica.
+				tieneEspecialidad := esEstudio
+				espMatch := especialidad
+				if !esEstudio {
 				espClinicaRows, err := PGPool.Query(queryCtx,
 					`SELECT especialidad FROM clinica_especialidades WHERE clinica_id = $1`, c.ID)
 				if err != nil {
 					continue
 				}
-				tieneEspecialidad := false
-				var espMatch string
 				for espClinicaRows.Next() {
 					var esp string
 					if err := espClinicaRows.Scan(&esp); err != nil {
@@ -300,6 +310,7 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 					}
 				}
 				espClinicaRows.Close()
+				}
 				if !tieneEspecialidad {
 					continue
 				}

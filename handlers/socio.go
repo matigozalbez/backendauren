@@ -373,6 +373,39 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
+		// Si se pasa ?id=<dni>, devolver solo ese socio (1 lectura)
+		if id := r.URL.Query().Get("id"); id != "" {
+			doc, err := fsClient.Collection("socios").Doc(id).Get(ctx)
+			if err != nil || !doc.Exists() {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"socios": []interface{}{}, "nextCursor": "", "hasMore": false,
+				})
+				return
+			}
+			data := doc.Data()
+			socio := map[string]interface{}{
+				"id":         doc.Ref.ID,
+				"uid":        data["uid"],
+				"nombre":     data["nombre"],
+				"apellido":   data["apellido"],
+				"email":      data["email"],
+				"dni":        data["dni"],
+				"edad":       data["edad"],
+				"planes":     data["planes"],
+				"estado":     data["estado"],
+				"adherentes": data["adherentes"],
+				"provincia":  data["provincia"],
+				"ciudad":     data["ciudad"],
+				"direccion":  data["direccion"],
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"socios": []interface{}{socio}, "nextCursor": "", "hasMore": false,
+			})
+			return
+		}
+
 		// limit: cuántos socios traer por página (default 20)
 		limit := 20
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -413,6 +446,7 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 				"apellido":   data["apellido"],
 				"email":      data["email"],
 				"dni":        data["dni"],
+				"edad":       data["edad"],
 				"planes":     data["planes"],
 				"estado":     data["estado"],
 				"adherentes": data["adherentes"],
