@@ -134,6 +134,15 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		}
 
 		socioData := snap.Data()
+
+		// Los turnos y estudios médicos son servicios exclusivos de Auren Salud.
+		// Se valida el estado del socio y el del plan antes de crear el turno.
+		acceso := evaluarAccesoAurenSalud(socioData)
+		if !acceso.SocioActivo || !acceso.PlanSaludActivo {
+			responderSinAccesoSalud(w, acceso)
+			return
+		}
+
 		socioDni, _ := socioData["dni"].(string)
 		socioNombre, _ := socioData["nombre"].(string)
 		socioApellido, _ := socioData["apellido"].(string)
