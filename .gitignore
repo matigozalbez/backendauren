@@ -3,4 +3,5 @@ serviceAccountKey.json
 crear_clinicas.bat
 crear_medicos.bat
 crear_turnos.bat
+crear_franja_preferida.bat
 AGENTS.md

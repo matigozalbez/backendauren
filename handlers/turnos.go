@@ -27,8 +27,18 @@ type TurnoInput struct {
 	Tipo      string `json:"tipo"`
 	ImagenURL string `json:"imagenUrl"`
 
+	// Franja horaria preferida por el socio: "mañana" | "tarde" | "noche" o vacío.
+	FranjaPreferida string `json:"franjaPreferida"`
+
 	// Si es para un adherente, mandar su DNI. Si va vacío, el turno es para el titular.
 	AdherenteDni string `json:"adherenteDni"`
+}
+
+// franjasPreferidasValidas son las franjas horarias aceptadas para un turno o estudio.
+var franjasPreferidasValidas = map[string]bool{
+	"mañana": true,
+	"tarde":  true,
+	"noche":  true,
 }
 type Adherente struct {
 	Dni        string `firestore:"dni"`
@@ -85,6 +95,11 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 		input.Modo = strings.TrimSpace(input.Modo)
 		input.NombreProfesionalSugerido = strings.TrimSpace(input.NombreProfesionalSugerido)
 		input.AdherenteDni = strings.TrimSpace(input.AdherenteDni)
+		input.FranjaPreferida = strings.ToLower(strings.TrimSpace(input.FranjaPreferida))
+		if input.FranjaPreferida != "" && !franjasPreferidasValidas[input.FranjaPreferida] {
+			http.Error(w, "franjaPreferida inválida, debe ser una franja", http.StatusBadRequest)
+			return
+		}
 
 		if input.Especialidad == "" || input.Ciudad == "" {
 			http.Error(w, "faltan datos", http.StatusBadRequest)
@@ -201,8 +216,8 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 				uid, socio_dni, socio_email, solicitado_por,
 				es_para_adherente, beneficiario_dni, beneficiario_nombre,
 				especialidad, ciudad, direccion, lat, lng, motivo, modo,
-				nombre_profesional_sugerido, tipo, imagen_url, estado
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pendiente')
+				nombre_profesional_sugerido, tipo, imagen_url, franja_preferida, estado
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendiente')
 			RETURNING id::text`,
 			uid,
 			socioDni,
@@ -221,6 +236,7 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			input.NombreProfesionalSugerido,
 			input.Tipo,
 			input.ImagenURL,
+			input.FranjaPreferida,
 		).Scan(&turnoID)
 		if err != nil {
 			var pgErr *pgconn.PgError

@@ -33,6 +33,7 @@ type TurnoAdminView struct {
 	Estado             string `json:"estado"`
 	Modo               string `json:"modo"`
 	ImagenURL          string `json:"imagenUrl,omitempty"`
+	FranjaPreferida    string `json:"franjaPreferida,omitempty"`
 	MedicoID           string `json:"medicoId,omitempty"`
 	MedicoNombre       string `json:"medicoNombre,omitempty"`
 	MedicoApellido     string `json:"medicoApellido,omitempty"`
@@ -60,7 +61,7 @@ func ListarTurnos() http.HandlerFunc {
 		query := `SELECT id::text, uid, socio_dni, solicitado_por,
 			es_para_adherente, beneficiario_dni, beneficiario_nombre,
 			COALESCE(tipo,'consulta'), especialidad, ciudad, direccion, motivo, estado, modo,
-			COALESCE(imagen_url,''),
+			COALESCE(imagen_url,''), COALESCE(franja_preferida,''),
 			COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
 			COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
 			COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
@@ -86,7 +87,7 @@ func ListarTurnos() http.HandlerFunc {
 			if err := rows.Scan(&t.ID, &t.Uid, &t.SocioDni, &t.SolicitadoPor,
 				&t.EsParaAdherente, &t.BeneficiarioDni, &t.BeneficiarioNombre,
 				&t.Tipo, &t.Especialidad, &t.Ciudad, &t.Direccion, &t.Motivo, &t.Estado, &t.Modo,
-				&t.ImagenURL,
+				&t.ImagenURL, &t.FranjaPreferida,
 				&t.MedicoID, &t.MedicoNombre, &t.MedicoApellido, &t.MedicoDireccion,
 				&t.Fecha, &t.Hora,
 				&t.ClinicaID, &t.ClinicaNombre, &t.ClinicaDireccion); err != nil {
