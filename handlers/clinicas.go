@@ -531,7 +531,7 @@ func AsignarClinica(
 								Title: "Turno asignado ✅",
 								Body: fmt.Sprintf(
 									"Tu %s de %s fue asignado en %s para el %s a las %s.",
-									palabra, especialidad, clinicaNombre, input.Fecha, input.Hora,
+									palabra, especialidad, clinicaNombre, fechaFinal, horaFinal,
 								),
 								Icon: "/icon-192.png",
 							},
@@ -556,8 +556,8 @@ func AsignarClinica(
 				clinicaNombre,
 				"",
 				clinicaDireccion,
-				input.Fecha,
-				input.Hora,
+				fechaFinal,
+				horaFinal,
 			)
 			if err != nil {
 				log.Printf("ERROR enviando email de turno a %s: %v", socioEmail, err)

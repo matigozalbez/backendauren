@@ -323,8 +323,8 @@ func AsignarMedico(
 								Body: fmt.Sprintf(
 									"Tu turno de %s fue asignado para el %s a las %s.",
 									especialidad,
-									input.Fecha,
-									input.Hora,
+									fechaFinal,
+									horaFinal,
 								),
 								Icon: "/icon-192.png",
 							},
@@ -369,8 +369,8 @@ func AsignarMedico(
 				medicoNombre,
 				medicoApellido,
 				medicoDireccion,
-				input.Fecha,
-				input.Hora,
+				fechaFinal,
+				horaFinal,
 			)
 
 			if err != nil {

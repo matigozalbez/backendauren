@@ -32,6 +32,11 @@ func main() {
 	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
 	handlers.PGPool = PG
+
+	// Marca como 'completado' los turnos asignados cuyo horario ya pasó
+	// (cada minuto en background). Sin esto podrían cancelarse desde la app
+	// y liberar el cupo del mes.
+	handlers.IniciarCompletadoAutomatico()
 	/*
 		if err := handlers.ReconstruirStats(firebase.Client); err != nil {
 			log.Fatal(err)
@@ -337,6 +342,15 @@ func main() {
 			return
 		}
 		middleware.RequireAdmin(handlers.ListarTurnos())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cancelar-turno", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.CancelarTurnoAdmin())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/geocoding-stats", func(w http.ResponseWriter, r *http.Request) {
