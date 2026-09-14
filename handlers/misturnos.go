@@ -67,6 +67,7 @@ func MisTurnos(
 				   es_para_adherente, beneficiario_dni, beneficiario_nombre,
 				   COALESCE(tipo,'consulta'), especialidad, ciudad, direccion, motivo, estado, modo,
 				   COALESCE(imagen_url,''), COALESCE(franja_preferida,''),
+				   COALESCE(motivo_cancelacion,''), COALESCE(cancelado_en::text,''),
 				   COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
 				   COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
 				   COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
@@ -90,7 +91,7 @@ func MisTurnos(
 			if err := rows.Scan(&turno.ID, &turno.Uid, &turno.SocioDni, &turno.SolicitadoPor,
 				&turno.EsParaAdherente, &turno.BeneficiarioDni, &turno.BeneficiarioNombre,
 				&turno.Tipo, &turno.Especialidad, &turno.Ciudad, &turno.Direccion, &turno.Motivo, &turno.Estado, &turno.Modo,
-				&turno.ImagenURL, &turno.FranjaPreferida,
+				&turno.ImagenURL, &turno.FranjaPreferida, &turno.MotivoCancelacion, &turno.CanceladoEn,
 				&turno.MedicoID, &turno.MedicoNombre, &turno.MedicoApellido, &turno.MedicoDireccion,
 				&turno.Fecha, &turno.Hora,
 				&turno.ClinicaID, &turno.ClinicaNombre, &turno.ClinicaDireccion); err != nil {

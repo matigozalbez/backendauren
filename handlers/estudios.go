@@ -104,6 +104,7 @@ func ListarEstudios() http.HandlerFunc {
 			es_para_adherente, beneficiario_dni, beneficiario_nombre,
 			COALESCE(tipo,'consulta'), especialidad, ciudad, direccion, motivo, estado, modo,
 			COALESCE(imagen_url,''), COALESCE(franja_preferida,''),
+			COALESCE(motivo_cancelacion,''), COALESCE(cancelado_en::text,''),
 			COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
 			COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
 			COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
@@ -131,7 +132,7 @@ func ListarEstudios() http.HandlerFunc {
 			if err := rows.Scan(&t.ID, &t.Uid, &t.SocioDni, &t.SolicitadoPor,
 				&t.EsParaAdherente, &t.BeneficiarioDni, &t.BeneficiarioNombre,
 				&t.Tipo, &t.Especialidad, &t.Ciudad, &t.Direccion, &t.Motivo, &t.Estado, &t.Modo,
-				&t.ImagenURL, &t.FranjaPreferida,
+				&t.ImagenURL, &t.FranjaPreferida, &t.MotivoCancelacion, &t.CanceladoEn,
 				&t.MedicoID, &t.MedicoNombre, &t.MedicoApellido, &t.MedicoDireccion,
 				&t.Fecha, &t.Hora,
 				&t.ClinicaID, &t.ClinicaNombre, &t.ClinicaDireccion); err != nil {

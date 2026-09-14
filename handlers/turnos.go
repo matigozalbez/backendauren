@@ -337,3 +337,85 @@ func MisTurnosCupo(authClient *auth.Client) http.HandlerFunc {
 		})
 	}
 }
+
+// CancelarMisTurno permite que el socio cancele un turno o estudio propio
+// (estado 'pendiente' o 'asignado'), dejando el motivo para que los gestores
+// lo vean en el panel. Sin dual-write: solo se actualiza PostgreSQL.
+func CancelarMisTurno(authClient *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		uid, err := verifyIDToken(r, authClient)
+		if err != nil {
+			http.Error(w, "no autorizado, iniciá sesión", http.StatusUnauthorized)
+			return
+		}
+
+		var input struct {
+			TurnoID string `json:"turnoId"`
+			Motivo  string `json:"motivo"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+
+		input.TurnoID = strings.TrimSpace(input.TurnoID)
+		input.Motivo = strings.TrimSpace(input.Motivo)
+		if input.TurnoID == "" {
+			http.Error(w, "falta turnoId", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		var dueno, estadoActual string
+		err = PGPool.QueryRow(ctx, `
+			SELECT uid, estado FROM turnos WHERE id::text = $1`,
+			input.TurnoID,
+		).Scan(&dueno, &estadoActual)
+		if err != nil {
+			http.Error(w, "turno no encontrado", http.StatusNotFound)
+			return
+		}
+
+		if dueno != uid {
+			http.Error(w, "no podés cancelar un turno que no es tuyo", http.StatusForbidden)
+			return
+		}
+
+		if estadoActual == "cancelado" {
+			http.Error(w, "el turno ya está cancelado", http.StatusConflict)
+			return
+		}
+		if estadoActual != "pendiente" && estadoActual != "asignado" {
+			http.Error(w, "ese turno ya no se puede cancelar desde la app", http.StatusConflict)
+			return
+		}
+
+		_, err = PGPool.Exec(ctx, `
+			UPDATE turnos SET
+				estado = 'cancelado',
+				motivo_cancelacion = $2,
+				cancelado_por = 'usuario',
+				cancelado_en = NOW()
+			WHERE id::text = $1`,
+			input.TurnoID, input.Motivo,
+		)
+		if err != nil {
+			log.Printf("ERROR cancelando turno %s: %v", input.TurnoID, err)
+			http.Error(w, "error al cancelar el turno", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("TURNO CANCELADO por el socio id=%s uid=%s", input.TurnoID, uid)
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}

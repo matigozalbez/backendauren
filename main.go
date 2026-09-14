@@ -450,6 +450,20 @@ func main() {
 		)(w, r)
 	})
 
+	mux.HandleFunc("/api/mis-turnos/cancelar", func(w http.ResponseWriter, r *http.Request) {
+
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		handlers.CancelarMisTurno(
+			firebase.AuthClient,
+		)(w, r)
+	})
+
 	mux.HandleFunc("/api/admin/otorgar-admin", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
