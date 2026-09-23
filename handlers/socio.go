@@ -253,6 +253,14 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
+		if emailToSave != "" {
+			if _, err := PGPool.Exec(ctx,
+				`INSERT INTO socios_conocidos (dni, email) VALUES ($1, $2) ON CONFLICT (dni) DO NOTHING`,
+				input.DNI, emailToSave); err != nil {
+				log.Printf("ERROR registrando socio %s en socios_conocidos: %v", input.DNI, err)
+			}
+		}
+
 		stats, errStats := leerStats()
 		if errStats == nil {
 			stats.TotalSocios++
@@ -722,6 +730,9 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 		procesados, omitidos := 0, 0
 		nuevosActivos, nuevosInactivos := 0, 0
 
+		var procesadosDNIs []string
+		var procesadosEmails []string
+
 		for {
 			row, err := reader.Read()
 			if err == io.EOF {
@@ -784,6 +795,8 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 			}
 
 			procesados++
+			procesadosDNIs = append(procesadosDNIs, dni)
+			procesadosEmails = append(procesadosEmails, email)
 			if estado == "activo" {
 				nuevosActivos++
 			} else if estado == "inactivo" {
@@ -792,6 +805,26 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		bulkWriter.End()
+
+		nuevos := 0
+		if len(procesadosDNIs) > 0 {
+			conocidos, err := dnisConocidos(ctx, procesadosDNIs)
+			if err != nil {
+				log.Printf("ERROR consultando socios_conocidos durante import: %v", err)
+			} else {
+				pendientes := make([][]interface{}, 0, len(procesadosDNIs))
+				for i, dni := range procesadosDNIs {
+					if !conocidos[dni] && procesadosEmails[i] != "" {
+						pendientes = append(pendientes, []interface{}{dni, procesadosEmails[i]})
+					}
+				}
+				if n, err := insertConocidos(ctx, []string{"dni", "email"}, pendientes); err != nil {
+					log.Printf("ERROR registrando nuevos en socios_conocidos: %v", err)
+				} else {
+					nuevos = n
+				}
+			}
+		}
 
 		// Nota: esto es un approach simplificado — recalcula sobre lo importado,
 		// no diferencia altas nuevas de actualizaciones de socios que ya existían
@@ -803,6 +836,7 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 			"status":     "ok",
 			"procesados": procesados,
 			"omitidos":   omitidos,
+			"nuevos":     nuevos,
 		})
 	}
 }

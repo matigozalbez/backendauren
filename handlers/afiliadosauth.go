@@ -27,11 +27,16 @@ var (
 )
 
 var RESEND_API_KEY string
+var APP_LINK string
 
 func InicializarConfig() {
 	RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
 	if RESEND_API_KEY == "" {
 		log.Println("ADVERTENCIA: RESEND_API_KEY no está seteada")
+	}
+	APP_LINK = os.Getenv("APP_LINK")
+	if APP_LINK == "" {
+		log.Println("ADVERTENCIA: APP_LINK no está seteada")
 	}
 }
 

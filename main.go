@@ -554,6 +554,24 @@ func main() {
 		middleware.RequireAdmin(handlers.ImportarSociosCSV(firebase.Client))(w, r)
 	})
 
+	mux.HandleFunc("/api/admin/enviar-bienvenidas", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.EnviarBienvenidas())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/backfill-socios-conocidos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.BackfillSociosConocidos(firebase.Client))(w, r)
+	})
+
 	mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
 
 	http.HandleFunc("/api/ping", pingHandler)
