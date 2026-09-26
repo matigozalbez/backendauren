@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-
-	"cloud.google.com/go/firestore"
 )
 
 type ActualizarBeneficiosInput struct {
@@ -13,7 +11,7 @@ type ActualizarBeneficiosInput struct {
 	Beneficios []string `json:"beneficios"`
 }
 
-func ActualizarBeneficiosSocio(fsClient *firestore.Client) http.HandlerFunc {
+func ActualizarBeneficiosSocio() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -36,10 +34,20 @@ func ActualizarBeneficiosSocio(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
+		beneficiosJSON, err := json.Marshal(input.Beneficios)
+		if err != nil {
+			http.Error(w, "beneficios inválidos", http.StatusBadRequest)
+			return
+		}
+
 		ctx := context.Background()
-		_, err := fsClient.Collection("socios").Doc(dni).Update(ctx, []firestore.Update{
-			{Path: "beneficios." + input.Plan, Value: input.Beneficios},
-		})
+		_, err = PGPool.Exec(ctx,
+			`UPDATE socios SET
+				beneficios = jsonb_set(COALESCE(beneficios, '{}'::jsonb), ARRAY[$1], to_jsonb($2::jsonb), TRUE),
+				actualizado_en = now()
+			 WHERE dni = $3`,
+			input.Plan, string(beneficiosJSON), dni,
+		)
 		if err != nil {
 			http.Error(w, "error actualizando beneficios", http.StatusInternalServerError)
 			return

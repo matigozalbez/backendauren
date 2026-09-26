@@ -8,3 +8,5 @@ crear_cancelacion_turno.bat
 crear_completado_turno.bat
 AGENTS.md
 pg_test.bat
+migracion_pg.sql
+PLAN_MIGRACION.md

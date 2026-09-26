@@ -14,16 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	firebaseauth "firebase.google.com/go/v4/auth"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// autenticar con Firebase Admin en el resto del backend)
 var (
-	FirestoreClient *firestore.Client
-	AuthClient      *firebaseauth.Client
-	PGPool          *pgxpool.Pool
+	AuthClient *firebaseauth.Client
+	PGPool     *pgxpool.Pool
 )
 
 var RESEND_API_KEY string
@@ -43,19 +40,19 @@ func InicializarConfig() {
 // son estructuras =>
 
 type AfiliadoPreRegistrado struct {
-	Nombre   string `firestore:"nombre"`
-	Apellido string `firestore:"apellido"`
-	DNI      string `firestore:"dni"`
-	Email    string `firestore:"email"`
-	Plan     string `firestore:"plan"`
-	UID      string `firestore:"uid"` // se completa recién cuando crea la cuenta
+	Nombre   string `json:"nombre"`
+	Apellido string `json:"apellido"`
+	DNI      string `json:"dni"`
+	Email    string `json:"email"`
+	Plan     string `json:"plan"`
+	UID      string `json:"uid"`
 }
 
 type CodigoVerificacion struct {
-	Codigo     string    `firestore:"codigo"`
-	Expira     time.Time `firestore:"expira"`
-	Intentos   int       `firestore:"intentos"`
-	Verificado bool      `firestore:"verificado"`
+	Codigo     string    `json:"codigo"`
+	Expira     time.Time `json:"expira"`
+	Intentos   int       `json:"intentos"`
+	Verificado bool      `json:"verificado"`
 }
 
 func generarCodigo() (string, error) {
@@ -144,29 +141,24 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	respuestaGenerica := map[string]string{"mensaje": "Si el DNI está registrado, te enviamos un código."}
 
-	doc, err := FirestoreClient.Collection("socios").Doc(req.DNI).Get(ctx)
-	if err != nil || !doc.Exists() {
+	socio, err := leerSocioPorDNI(ctx, req.DNI)
+	if err != nil {
 		log.Printf("[solicitar-codigo] DNI %s no encontrado (err=%v)", req.DNI, err)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(respuestaGenerica)
 		return
 	}
-	log.Printf("[solicitar-codigo] doc encontrado para dni=%s", req.DNI)
+	log.Printf("[solicitar-codigo] socio encontrado para dni=%s", req.DNI)
 
-	var afiliado AfiliadoPreRegistrado
-	if err := doc.DataTo(&afiliado); err != nil {
-		log.Printf("[solicitar-codigo] ERROR parseando afiliado %s: %v", req.DNI, err)
-		http.Error(w, "Error interno", 500)
-		return
-	}
-	log.Printf("[solicitar-codigo] afiliado parseado: email=%q uid=%q", afiliado.Email, afiliado.UID)
+	afiliadoUID := socio.UIDStr()
+	log.Printf("[solicitar-codigo] afiliado: email=%q uid=%q", socio.Email, afiliadoUID)
 
-	if req.Flujo == "primer_ingreso" && afiliado.UID != "" {
+	if req.Flujo == "primer_ingreso" && afiliadoUID != "" {
 		log.Printf("[solicitar-codigo] rechazo: primer_ingreso pero ya tiene UID")
 		http.Error(w, "DNI inválido", http.StatusBadRequest)
 		return
 	}
-	if req.Flujo == "recuperar_password" && afiliado.UID == "" {
+	if req.Flujo == "recuperar_password" && afiliadoUID == "" {
 		log.Printf("[solicitar-codigo] rechazo: recuperar_password pero no tiene UID")
 		http.Error(w, "DNI inválido", http.StatusBadRequest)
 		return
@@ -180,27 +172,44 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[solicitar-codigo] codigo generado ok")
 
-	_, err = FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Set(ctx, CodigoVerificacion{
-		Codigo:     codigo,
-		Expira:     time.Now().Add(10 * time.Minute),
-		Intentos:   0,
-		Verificado: false,
-	})
+	// El código anterior se reemplaza, pero `intentos` NO se reinicia al
+	// pedir un código nuevo: es un contador acumulado por DNI. Si se
+	// reiniciara acá, el límite de 5 intentos de VerificarCodigo se evadiría
+	// sin más pidiendo un código y volviendo a fallar 5 veces, en bucle.
+	//
+	// El reset es por tiempo, no por pedido: si el registro tiene más de una
+	// hora, vuelve a cero. Así un socio que se equivocó 5 veces se recupera
+	// solo, y aun así el brute force no cierra: con el rate limit de 3
+	// códigos/hora quedan 5 intentos por hora contra un código de 6 dígitos.
+	_, err = PGPool.Exec(ctx, `
+		INSERT INTO codigos_verificacion (dni, codigo, expira, intentos, verificado, creado_en)
+		VALUES ($1, $2, $3, 0, FALSE, now())
+		ON CONFLICT (dni) DO UPDATE SET
+			codigo = EXCLUDED.codigo,
+			expira = EXCLUDED.expira,
+			verificado = FALSE,
+			creado_en = now(),
+			intentos = CASE
+				WHEN codigos_verificacion.creado_en < now() - interval '1 hour' THEN 0
+				ELSE codigos_verificacion.intentos
+			END`,
+		req.DNI, codigo, time.Now().Add(10*time.Minute),
+	)
 	if err != nil {
-		log.Printf("[solicitar-codigo] ERROR guardando codigo en Firestore: %v", err)
+		log.Printf("[solicitar-codigo] ERROR guardando codigo en PG: %v", err)
 		http.Error(w, "Error guardando código", 500)
 		return
 	}
-	log.Printf("[solicitar-codigo] codigo guardado en Firestore ok")
+	log.Printf("[solicitar-codigo] codigo guardado en PostgreSQL ok")
 
-	if err := enviarCodigoPorMail(afiliado.Email, afiliado.Nombre, codigo); err != nil {
-		log.Printf("[solicitar-codigo] ERROR enviando mail a %q: %v", afiliado.Email, err)
+	if err := enviarCodigoPorMail(socio.Email, socio.Nombre, codigo); err != nil {
+		log.Printf("[solicitar-codigo] ERROR enviando mail a %q: %v", socio.Email, err)
 		http.Error(w, "Error enviando el código", 500)
 		return
 	}
-	log.Printf("[solicitar-codigo] mail enviado ok a %q", afiliado.Email)
+	log.Printf("[solicitar-codigo] mail enviado ok a %q", socio.Email)
 
-	respuestaGenerica["mailEnmascarado"] = enmascararMail(afiliado.Email)
+	respuestaGenerica["mailEnmascarado"] = enmascararMail(socio.Email)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(respuestaGenerica)
 }
@@ -227,21 +236,20 @@ func VerificarCodigo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := context.Background()
-	ref := FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI)
-	doc, err := ref.Get(ctx)
-	if err != nil || !doc.Exists() {
+	var cv CodigoVerificacion
+	err := PGPool.QueryRow(ctx, `
+		SELECT codigo, expira, intentos, verificado
+		FROM codigos_verificacion WHERE dni = $1`, req.DNI,
+	).Scan(&cv.Codigo, &cv.Expira, &cv.Intentos, &cv.Verificado)
+	if err != nil {
 		http.Error(w, "Código no encontrado, solicitalo de nuevo", http.StatusBadRequest)
 		return
 	}
 
-	var cv CodigoVerificacion
-	if err := doc.DataTo(&cv); err != nil {
-		http.Error(w, "Error interno", 500)
-		return
-	}
-
+	// El contador es acumulado por DNI, no por código: pedir uno nuevo no lo
+	// reinicia, así que el mensaje dice que esperen, no que reintenten.
 	if cv.Intentos >= 5 {
-		http.Error(w, "Demasiados intentos, solicitá un código nuevo", http.StatusTooManyRequests)
+		http.Error(w, "Demasiados intentos, esperá una hora para volver a intentar", http.StatusTooManyRequests)
 		return
 	}
 
@@ -251,12 +259,12 @@ func VerificarCodigo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cv.Codigo != req.Codigo {
-		ref.Update(ctx, []firestore.Update{{Path: "intentos", Value: cv.Intentos + 1}})
+		PGPool.Exec(ctx, `UPDATE codigos_verificacion SET intentos = intentos + 1 WHERE dni = $1`, req.DNI)
 		http.Error(w, "Código incorrecto", http.StatusBadRequest)
 		return
 	}
 
-	ref.Update(ctx, []firestore.Update{{Path: "verificado", Value: true}})
+	PGPool.Exec(ctx, `UPDATE codigos_verificacion SET verificado = TRUE WHERE dni = $1`, req.DNI)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"verificado": true})
@@ -301,40 +309,33 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Chequeamos que efectivamente haya pasado por la verificación de código,
 	// no confiamos en que el frontend "diga" que ya lo verificó
-	codigoDoc, err := FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Get(ctx)
-	if err != nil || !codigoDoc.Exists() {
+	var verificado bool
+	err := PGPool.QueryRow(ctx,
+		`SELECT verificado FROM codigos_verificacion WHERE dni = $1`, req.DNI,
+	).Scan(&verificado)
+	if err != nil || !verificado {
 		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
 		return
 	}
 
-	var cv CodigoVerificacion
-	codigoDoc.DataTo(&cv)
-	if !cv.Verificado {
-		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
-		return
-	}
-
-	afiliadoRef := FirestoreClient.Collection("socios").Doc(req.DNI)
-	afiliadoDoc, err := afiliadoRef.Get(ctx)
-	if err != nil || !afiliadoDoc.Exists() {
+	socio, err := leerSocioPorDNI(ctx, req.DNI)
+	if err != nil {
 		http.Error(w, "Afiliado no encontrado", http.StatusBadRequest)
 		return
 	}
-	var afiliado AfiliadoPreRegistrado
-	afiliadoDoc.DataTo(&afiliado)
 
-	if afiliado.UID != "" {
+	if socio.UIDStr() != "" {
 		http.Error(w, "Este DNI ya tiene una cuenta creada", http.StatusConflict)
 		return
 	}
 
 	// Chequeo extra: puede que este mail YA tenga cuenta en Firebase Auth
-	// por otra vía (ej. Google Sign-In previo) aunque nuestro Firestore
-	// nunca se enteró. En ese caso no creamos una cuenta nueva, vinculamos
+	// por otra vía (ej. Google Sign-In previo) aunque nosotros nunca nos
+	// enteramos. En ese caso no creamos una cuenta nueva, vinculamos
 	// la que ya existe.
-	usuarioExistente, err := AuthClient.GetUserByEmail(ctx, afiliado.Email)
+	usuarioExistente, err := AuthClient.GetUserByEmail(ctx, socio.Email)
 	if err == nil && usuarioExistente != nil {
-		log.Printf("DEBUG: mail %s ya tenía cuenta en Auth (uid=%s), vinculando en vez de crear", afiliado.Email, usuarioExistente.UID)
+		log.Printf("DEBUG: mail %s ya tenía cuenta en Auth (uid=%s), vinculando en vez de crear", socio.Email, usuarioExistente.UID)
 
 		// Le seteamos la password nueva a la cuenta existente
 		updateParams := (&firebaseauth.UserToUpdate{}).Password(req.Password)
@@ -344,8 +345,8 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		afiliadoRef.Update(ctx, []firestore.Update{{Path: "uid", Value: usuarioExistente.UID}})
-		FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Delete(ctx)
+		PGPool.Exec(ctx, `UPDATE socios SET uid = $2, actualizado_en = now() WHERE dni = $1`, req.DNI, usuarioExistente.UID)
+		PGPool.Exec(ctx, `DELETE FROM codigos_verificacion WHERE dni = $1`, req.DNI)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"uid": usuarioExistente.UID, "vinculado": "true"})
@@ -354,9 +355,9 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Creamos el usuario real en Firebase Auth (caso normal: no existía antes)
 	params := (&firebaseauth.UserToCreate{}).
-		Email(afiliado.Email).
+		Email(socio.Email).
 		Password(req.Password).
-		DisplayName(afiliado.Nombre + " " + afiliado.Apellido)
+		DisplayName(socio.Nombre + " " + socio.Apellido)
 
 	userRecord, err := AuthClient.CreateUser(ctx, params)
 	if err != nil {
@@ -365,11 +366,11 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vinculamos el UID de Auth con el documento del afiliado
-	afiliadoRef.Update(ctx, []firestore.Update{{Path: "uid", Value: userRecord.UID}})
+	// Vinculamos el UID de Auth con el socio
+	PGPool.Exec(ctx, `UPDATE socios SET uid = $2, actualizado_en = now() WHERE dni = $1`, req.DNI, userRecord.UID)
 
 	// Limpiamos el código, ya cumplió su función
-	FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Delete(ctx)
+	PGPool.Exec(ctx, `DELETE FROM codigos_verificacion WHERE dni = $1`, req.DNI)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"uid": userRecord.UID})
@@ -412,57 +413,51 @@ func CambiarPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Mismo chequeo que CrearPassword: no confiamos en que el frontend
-	// "diga" que ya verificó el código, lo confirmamos contra Firestore.
-	codigoDoc, err := FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Get(ctx)
-	if err != nil || !codigoDoc.Exists() {
-		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
-		return
-	}
-	var cv CodigoVerificacion
-	codigoDoc.DataTo(&cv)
-	if !cv.Verificado {
+	// "diga" que ya verificó el código, lo confirmamos contra PG.
+	var verificado bool
+	err := PGPool.QueryRow(ctx,
+		`SELECT verificado FROM codigos_verificacion WHERE dni = $1`, req.DNI,
+	).Scan(&verificado)
+	if err != nil || !verificado {
 		http.Error(w, "Verificá tu código primero", http.StatusForbidden)
 		return
 	}
 
-	afiliadoRef := FirestoreClient.Collection("socios").Doc(req.DNI)
-	afiliadoDoc, err := afiliadoRef.Get(ctx)
-	if err != nil || !afiliadoDoc.Exists() {
+	socio, err := leerSocioPorDNI(ctx, req.DNI)
+	if err != nil {
 		http.Error(w, "Afiliado no encontrado", http.StatusBadRequest)
 		return
 	}
-	var afiliado AfiliadoPreRegistrado
-	afiliadoDoc.DataTo(&afiliado)
 
 	// A diferencia de CrearPassword: acá SÍ necesitamos que ya tenga cuenta.
 	// Si nunca la activó, no hay password que cambiar, tiene que hacer Primer Ingreso.
-	if afiliado.UID == "" {
+	if socio.UIDStr() == "" {
 		http.Error(w, "Todavía no activaste tu cuenta. Hacé el Primer Ingreso primero.", http.StatusBadRequest)
 		return
 	}
 
 	updateParams := (&firebaseauth.UserToUpdate{}).Password(req.Password)
-	if _, err := AuthClient.UpdateUser(ctx, afiliado.UID, updateParams); err != nil {
-		log.Printf("error actualizando password para uid %s (dni %s): %v", afiliado.UID, req.DNI, err)
+	if _, err := AuthClient.UpdateUser(ctx, socio.UIDStr(), updateParams); err != nil {
+		log.Printf("error actualizando password para uid %s (dni %s): %v", socio.UIDStr(), req.DNI, err)
 		http.Error(w, "Error actualizando la contraseña", http.StatusInternalServerError)
 		return
 	}
 
 	// Limpiamos el código, ya cumplió su función
-	FirestoreClient.Collection("codigosVerificacion").Doc(req.DNI).Delete(ctx)
+	PGPool.Exec(ctx, `DELETE FROM codigos_verificacion WHERE dni = $1`, req.DNI)
 
 	// Generamos un custom token para que el frontend pueda loguear
 	// directo al usuario tras el cambio, sin pedirle que ingrese de nuevo.
-	customToken, err := AuthClient.CustomToken(ctx, afiliado.UID)
+	customToken, err := AuthClient.CustomToken(ctx, socio.UIDStr())
 	if err != nil {
-		log.Printf("error generando custom token para uid %s: %v", afiliado.UID, err)
+		log.Printf("error generando custom token para uid %s: %v", socio.UIDStr(), err)
 		// No cortamos la respuesta por esto: la password ya se cambió bien,
 		// simplemente el usuario va a tener que loguearse manualmente.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"uid": afiliado.UID})
+		json.NewEncoder(w).Encode(map[string]string{"uid": socio.UIDStr()})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"uid": afiliado.UID, "customToken": customToken})
+	json.NewEncoder(w).Encode(map[string]string{"uid": socio.UIDStr(), "customToken": customToken})
 }

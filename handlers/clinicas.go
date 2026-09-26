@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/messaging"
 )
 
@@ -336,7 +335,6 @@ type AsignarClinicaInput struct {
 }
 
 func AsignarClinica(
-	fsClient *firestore.Client,
 	msgClient *messaging.Client,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -513,13 +511,13 @@ func AsignarClinica(
 
 		// Push.
 		if uid != "" && msgClient != nil {
-			tokenSnap, err := fsClient.Collection("push_tokens").Doc(uid).Get(ctx)
+			var token string
+			err := PGPool.QueryRow(ctx,
+				`SELECT token FROM push_tokens WHERE uid = $1`, uid,
+			).Scan(&token)
 			if err != nil {
 				log.Printf("WARNING: no se encontró push token para uid=%s: %v", uid, err)
-			} else {
-				tokenData := tokenSnap.Data()
-				token, _ := tokenData["token"].(string)
-				if token != "" {
+			} else if token != "" {
 					palabra := "turno"
 					if esEstudio {
 						palabra = "estudio"
@@ -543,7 +541,6 @@ func AsignarClinica(
 					}
 				}
 			}
-		}
 
 		// Email.
 		if socioEmail != "" {

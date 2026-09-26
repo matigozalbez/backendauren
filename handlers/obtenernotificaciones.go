@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
-	"google.golang.org/api/iterator"
 )
 
 type NotificacionResponse struct {
@@ -18,7 +17,7 @@ type NotificacionResponse struct {
 	Fecha   any    `json:"fecha,omitempty"`
 }
 
-func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func ObtenerNotificaciones(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -33,58 +32,42 @@ func ObtenerNotificaciones(fsClient *firestore.Client, authClient *auth.Client) 
 
 		ctx := context.Background()
 
-		var notificaciones []NotificacionResponse
+		notificaciones := []NotificacionResponse{}
 
-		qGenerales := fsClient.Collection("notificaciones").
-			Where("tipo", "==", "general").
-			OrderBy("fecha", firestore.Desc).
-			Limit(30)
-
-		iter := qGenerales.Documents(ctx)
-		for {
-			doc, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
+		leer := func(query string, args ...interface{}) {
+			rows, err := PGPool.Query(ctx, query, args...)
 			if err != nil {
-				log.Printf("❌ error query generales: %v", err) // 👈 nuevo
-				http.Error(w, "error leyendo notificaciones", http.StatusInternalServerError)
+				log.Printf("ERROR leyendo notificaciones: %v", err)
 				return
 			}
-			data := doc.Data()
-			notificaciones = append(notificaciones, NotificacionResponse{
-				ID:      doc.Ref.ID,
-				Titulo:  getString(data["titulo"]),
-				Mensaje: getString(data["mensaje"]),
-				Fecha:   data["fecha"],
-			})
+			defer rows.Close()
+
+			for rows.Next() {
+				var n NotificacionResponse
+				var fecha time.Time
+				if err := rows.Scan(&n.ID, &n.Titulo, &n.Mensaje, &fecha); err != nil {
+					continue
+				}
+				n.Fecha = fecha
+				notificaciones = append(notificaciones, n)
+			}
 		}
 
-		qUsuario := fsClient.Collection("notificaciones").
-			Where("tipo", "==", "usuario").
-			Where("user_id", "==", uid).
-			OrderBy("fecha", firestore.Desc).
-			Limit(30)
+		// 1. Generales (últimas 30)
+		leer(`
+			SELECT id::text, titulo, mensaje, fecha
+			FROM notificaciones
+			WHERE tipo = 'general'
+			ORDER BY fecha DESC
+			LIMIT 30`)
 
-		iterUsuario := qUsuario.Documents(ctx)
-		for {
-			doc, err := iterUsuario.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				log.Printf("❌ error query usuario: %v", err) // 👈 nuevo
-				http.Error(w, "error leyendo notificaciones", http.StatusInternalServerError)
-				return
-			}
-			data := doc.Data()
-			notificaciones = append(notificaciones, NotificacionResponse{
-				ID:      doc.Ref.ID,
-				Titulo:  getString(data["titulo"]),
-				Mensaje: getString(data["mensaje"]),
-				Fecha:   data["fecha"],
-			})
-		}
+		// 2. Propias del usuario (últimas 30)
+		leer(`
+			SELECT id::text, titulo, mensaje, fecha
+			FROM notificaciones
+			WHERE tipo = 'usuario' AND user_id = $1
+			ORDER BY fecha DESC
+			LIMIT 30`, uid)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

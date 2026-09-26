@@ -115,9 +115,11 @@ func ListarMedicos() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		rows, err := PGPool.Query(ctx,
-			`SELECT dni, nombre, apellido, especialidad, ciudad, provincia, direccion, imagen
-			 FROM medicos ORDER BY apellido, nombre`)
+	rows, err := PGPool.Query(ctx,
+		`SELECT COALESCE(dni,''), COALESCE(nombre,''), COALESCE(apellido,''),
+		        COALESCE(especialidad,''), COALESCE(ciudad,''), COALESCE(provincia,''),
+		        COALESCE(direccion,''), COALESCE(imagen,''), COALESCE(lat,0), COALESCE(lng,0)
+		 FROM medicos ORDER BY apellido, nombre`)
 		if err != nil {
 			http.Error(w, "error obteniendo medicos", http.StatusInternalServerError)
 			return
@@ -126,11 +128,12 @@ func ListarMedicos() http.HandlerFunc {
 
 		medicos := make([]map[string]interface{}, 0)
 		for rows.Next() {
-			var m MedicoRow
-			if err := rows.Scan(&m.DNI, &m.Nombre, &m.Apellido, &m.Especialidad,
-				&m.Ciudad, &m.Provincia, &m.Direccion, &m.Imagen); err != nil {
-				continue
-			}
+		var m MedicoRow
+		if err := rows.Scan(&m.DNI, &m.Nombre, &m.Apellido, &m.Especialidad,
+			&m.Ciudad, &m.Provincia, &m.Direccion, &m.Imagen, &m.Lat, &m.Lng); err != nil {
+			log.Printf("ERROR scaneando médico: %v", err)
+			continue
+		}
 			medicos = append(medicos, map[string]interface{}{
 				"id":           m.DNI,
 				"nombre":       m.Nombre,
@@ -213,7 +216,7 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 		queryCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		var resultado []SugerenciaLugar
+		resultado := []SugerenciaLugar{}
 
 		// Un estudio se deriva SIEMPRE a una clínica: no sugerimos médicos
 		// y no filtramos clínicas por especialidad (el tipo de estudio no
@@ -223,18 +226,21 @@ func SugerirMedicosCercanos() http.HandlerFunc {
 		// ── 1. MÉDICOS (solo consultas) ──
 		if !esEstudio {
 		medRows, err := PGPool.Query(queryCtx,
-			`SELECT dni, nombre, apellido, especialidad, direccion, ciudad, provincia, lat, lng
+			`SELECT COALESCE(dni,''), COALESCE(nombre,''), COALESCE(apellido,''),
+			        COALESCE(especialidad,''), COALESCE(direccion,''), COALESCE(ciudad,''),
+			        COALESCE(provincia,''), COALESCE(lat,0), COALESCE(lng,0)
 			 FROM medicos`)
 		if err != nil {
 			log.Printf("ERROR obteniendo médicos para sugerencia: %v", err)
 		} else {
 			defer medRows.Close()
 			for medRows.Next() {
-				var m MedicoRow
-				if err := medRows.Scan(&m.DNI, &m.Nombre, &m.Apellido, &m.Especialidad,
-					&m.Direccion, &m.Ciudad, &m.Provincia, &m.Lat, &m.Lng); err != nil {
-					continue
-				}
+			var m MedicoRow
+			if err := medRows.Scan(&m.DNI, &m.Nombre, &m.Apellido, &m.Especialidad,
+				&m.Direccion, &m.Ciudad, &m.Provincia, &m.Lat, &m.Lng); err != nil {
+				log.Printf("ERROR scaneando médico para sugerencia: %v", err)
+				continue
+			}
 
 				if espNormalizada != "" && normalizarEspecialidad(m.Especialidad) != espNormalizada {
 					continue

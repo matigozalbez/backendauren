@@ -8,18 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	"log"
-	"strconv"
-
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
 )
 
@@ -96,7 +91,7 @@ func verifyIDToken(r *http.Request, authClient *auth.Client) (string, error) {
 	return token.UID, nil
 }
 
-func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
+func CrearSocio() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -149,11 +144,8 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 			input.Estado = "activo"
 		}
 
-		// Convertimos adherentes a []interface{} para que Firestore lo
-		// guarde como array de mapas
-		adherentesData := make([]interface{}, 0, len(input.Adherentes))
+		// Validamos cada adherente antes de guardar.
 		for _, a := range input.Adherentes {
-
 			if a.Nombre == "" || a.Apellido == "" || a.DNI == "" {
 				http.Error(w, "faltan datos del adherente", http.StatusBadRequest)
 				return
@@ -179,76 +171,63 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 				http.Error(w, "edad de adherente inválida", http.StatusBadRequest)
 				return
 			}
-
-			adherentesData = append(adherentesData, map[string]interface{}{
-				"relacion": a.Relacion,
-				"nombre":   a.Nombre,
-				"apellido": a.Apellido,
-				"dni":      a.DNI,
-				"edad":     a.Edad,
-			})
-		}
-
-		planesData := make([]interface{}, 0, len(input.Planes))
-		for _, p := range input.Planes {
-			estadoPlan := p.Estado
-			if estadoPlan == "" {
-				estadoPlan = "activo" // Por defecto activo si no se envía
-			}
-			planesData = append(planesData, map[string]interface{}{
-				"nombre": p.Nombre,
-				"estado": estadoPlan,
-			})
 		}
 
 		ctx := context.Background()
 
-		doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
-
-		if err != nil && status.Code(err) != codes.NotFound {
-			http.Error(w, "error verificando socio", http.StatusInternalServerError)
-			return
-		}
-
-		if err == nil && doc.Exists() {
+		// ¿Ya existe ese DNI?
+		if _, err := leerSocioPorDNI(ctx, input.DNI); err == nil {
 			http.Error(w, "el socio ya existe", http.StatusConflict)
 			return
 		}
 
 		emailToSave := input.Email
-		if input.Email != "" {
+		if emailToSave != "" {
 			emailToSave = strings.ToLower(strings.TrimSpace(input.Email))
-			iter := fsClient.Collection("socios").Where("email", "==", emailToSave).Limit(1).Documents(ctx)
-			docs, err := iter.GetAll()
-			if err != nil {
-				http.Error(w, "error verificando email", http.StatusInternalServerError)
-				return
-			}
-			if len(docs) > 0 {
+			var yaExiste bool
+			if err := PGPool.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM socios WHERE email = $1)`, emailToSave,
+			).Scan(&yaExiste); err == nil && yaExiste {
 				http.Error(w, "el email ya está registrado", http.StatusConflict)
 				return
 			}
 		}
 
-		_, err = fsClient.Collection("socios").Doc(input.DNI).Set(ctx, map[string]interface{}{
-			"dni":                   input.DNI,
-			"nombre":                input.Nombre,
-			"apellido":              input.Apellido,
-			"email":                 emailToSave,
-			"edad":                  input.Edad,
-			"provincia":             input.Provincia,
-			"ciudad":                input.Ciudad,
-			"direccion":             input.Direccion,
-			"metodoPago":            input.MetodoPago,
-			"cbu":                   input.CBU,
-			"tarjetaUltimosDigitos": input.TarjetaUltimosDigitos,
-			"tarjetaVencimiento":    input.TarjetaVencimiento,
-			"planes":                planesData,
-			"estado":                input.Estado,
-			"adherentes":            adherentesData,
-			"uid":                   nil,
-		})
+		planesData, err := jsonbSociosPlanes(input.Planes)
 		if err != nil {
+			http.Error(w, "error guardando socio", http.StatusInternalServerError)
+			return
+		}
+		adherentesData, err := jsonbSociosAdherentes(input.Adherentes)
+		if err != nil {
+			http.Error(w, "error guardando socio", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = PGPool.Exec(ctx, `
+			INSERT INTO socios (
+				dni, nombre, apellido, email, edad, provincia, ciudad, direccion,
+				metodo_pago, cbu, tarjeta_ultimos_digitos, tarjeta_vencimiento,
+				planes, estado, adherentes, uid
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULL)`,
+			input.DNI,
+			input.Nombre,
+			input.Apellido,
+			emailToSave,
+			input.Edad,
+			input.Provincia,
+			input.Ciudad,
+			input.Direccion,
+			input.MetodoPago,
+			input.CBU,
+			input.TarjetaUltimosDigitos,
+			input.TarjetaVencimiento,
+			planesData,
+			input.Estado,
+			adherentesData,
+		)
+		if err != nil {
+			log.Printf("ERROR guardando socio %s: %v", input.DNI, err)
 			http.Error(w, "error guardando socio", http.StatusInternalServerError)
 			return
 		}
@@ -281,7 +260,7 @@ func CrearSocio(fsClient *firestore.Client) http.HandlerFunc {
 	}
 }
 
-func VincularSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func VincularSocio(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		uid, err := verifyIDToken(r, authClient)
 		if err != nil {
@@ -296,19 +275,18 @@ func VincularSocio(fsClient *firestore.Client, authClient *auth.Client) http.Han
 		}
 
 		ctx := context.Background()
-		doc, err := fsClient.Collection("socios").Doc(input.DNI).Get(ctx)
-		if err != nil || !doc.Exists() {
+		socio, err := leerSocioPorDNI(ctx, input.DNI)
+		if err != nil {
 			http.Error(w, "ese DNI no pertenece a ningún socio", http.StatusNotFound)
 			return
 		}
 
-		data := doc.Data()
-		if data["uid"] != nil {
+		if socio.UID != nil {
 			http.Error(w, "este DNI ya tiene una cuenta vinculada", http.StatusConflict)
 			return
 		}
 
-		mailRegistrado, _ := data["email"].(string)
+		mailRegistrado := socio.Email
 
 		usuarioAuth, err := authClient.GetUser(ctx, uid)
 		if err != nil {
@@ -321,9 +299,10 @@ func VincularSocio(fsClient *firestore.Client, authClient *auth.Client) http.Han
 			return
 		}
 
-		_, err = fsClient.Collection("socios").Doc(input.DNI).Update(ctx, []firestore.Update{
-			{Path: "uid", Value: uid},
-		})
+		_, err = PGPool.Exec(ctx,
+			`UPDATE socios SET uid = $2, actualizado_en = now() WHERE dni = $1`,
+			input.DNI, uid,
+		)
 		if err != nil {
 			http.Error(w, "error vinculando cuenta", http.StatusInternalServerError)
 			return
@@ -334,7 +313,7 @@ func VincularSocio(fsClient *firestore.Client, authClient *auth.Client) http.Han
 	}
 }
 
-func VerificarVinculacion(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func VerificarVinculacion(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		uid, err := verifyIDToken(r, authClient)
 		if err != nil {
@@ -343,19 +322,16 @@ func VerificarVinculacion(fsClient *firestore.Client, authClient *auth.Client) h
 		}
 
 		ctx := context.Background()
-		iter := fsClient.Collection("socios").Where("uid", "==", uid).Limit(1).Documents(ctx)
-		docs, err := iter.GetAll()
-		if err != nil {
-			http.Error(w, "error consultando", http.StatusInternalServerError)
-			return
-		}
+		var vinculado bool
+		_ = PGPool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM socios WHERE uid = $1)`, uid,
+		).Scan(&vinculado)
 
-		vinculado := len(docs) > 0
 		json.NewEncoder(w).Encode(map[string]bool{"vinculado": vinculado})
 	}
 }
 
-func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func MiSocio(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		uid, err := verifyIDToken(r, authClient)
 		if err != nil {
@@ -364,52 +340,61 @@ func MiSocio(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFu
 		}
 
 		ctx := context.Background()
-		iter := fsClient.Collection("socios").Where("uid", "==", uid).Limit(1).Documents(ctx)
-		docs, err := iter.GetAll()
-		if err != nil || len(docs) == 0 {
+		socio, err := leerSocioPorUID(ctx, uid)
+		if err != nil {
 			http.Error(w, "socio no encontrado", http.StatusNotFound)
 			return
 		}
 
-		data := docs[0].Data()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		json.NewEncoder(w).Encode(socio.Data())
 	}
 }
 
-func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
+// socioPublico arma el mapa que espera el panel, preservando los nombres de
+// campos que devolvía Firestore. completo agrega provincia/ciudad/direccion
+// (solo se usan en la vista de detalle ?id=).
+func socioPublico(s *SocioRecord, completo bool) map[string]interface{} {
+	socio := map[string]interface{}{
+		"id":         s.DNI,
+		"uid":        s.Data()["uid"],
+		"nombre":     s.Nombre,
+		"apellido":   s.Apellido,
+		"email":      s.Email,
+		"dni":        s.DNI,
+		"edad":       s.Edad,
+		"planes":     s.Data()["planes"],
+		"estado":     s.Estado,
+		"adherentes": s.Data()["adherentes"],
+		"beneficios": s.Data()["beneficios"],
+	}
+	if completo {
+		socio["provincia"] = s.Provincia
+		socio["ciudad"] = s.Ciudad
+		socio["direccion"] = s.Direccion
+	}
+	return socio
+}
+
+func ListarSocios() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Si se pasa ?id=<dni>, devolver solo ese socio (1 lectura)
 		if id := r.URL.Query().Get("id"); id != "" {
-			doc, err := fsClient.Collection("socios").Doc(id).Get(ctx)
-			if err != nil || !doc.Exists() {
+			socio, err := leerSocioPorDNI(ctx, id)
+			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"socios": []interface{}{}, "nextCursor": "", "hasMore": false,
 				})
 				return
 			}
-			data := doc.Data()
-			socio := map[string]interface{}{
-				"id":         doc.Ref.ID,
-				"uid":        data["uid"],
-				"nombre":     data["nombre"],
-				"apellido":   data["apellido"],
-				"email":      data["email"],
-				"dni":        data["dni"],
-				"edad":       data["edad"],
-				"planes":     data["planes"],
-				"estado":     data["estado"],
-				"adherentes": data["adherentes"],
-				"provincia":  data["provincia"],
-				"ciudad":     data["ciudad"],
-				"direccion":  data["direccion"],
-			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"socios": []interface{}{socio}, "nextCursor": "", "hasMore": false,
+				"socios":     []interface{}{socioPublico(socio, true)},
+				"nextCursor": "",
+				"hasMore":    false,
 			})
 			return
 		}
@@ -422,50 +407,42 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 			}
 		}
 
-		// cursor: el DNI (o ID de doc) del último socio de la página anterior
+		// cursor: el DNI del último socio de la página anterior
 		cursor := r.URL.Query().Get("cursor")
 
-		query := fsClient.Collection("socios").
-			OrderBy(firestore.DocumentID, firestore.Asc).
-			Limit(limit)
+		query := "SELECT " + columnasSocio + " FROM socios"
+		var args []interface{}
 
 		if cursor != "" {
-			docSnap, err := fsClient.Collection("socios").Doc(cursor).Get(ctx)
-			if err != nil {
-				http.Error(w, "cursor inválido", http.StatusBadRequest)
-				return
-			}
-			query = query.StartAfter(docSnap)
+			query += " WHERE dni > $1"
+			args = append(args, cursor)
 		}
 
-		docs, err := query.Documents(ctx).GetAll()
+		query += " ORDER BY dni ASC LIMIT $" + strconv.Itoa(len(args)+1)
+		args = append(args, limit)
+
+		rows, err := PGPool.Query(ctx, query, args...)
 		if err != nil {
 			http.Error(w, "error obteniendo socios", http.StatusInternalServerError)
 			return
 		}
+		defer rows.Close()
 
 		var socios []map[string]interface{}
-		for _, doc := range docs {
-			data := doc.Data()
-			socios = append(socios, map[string]interface{}{
-				"id":         doc.Ref.ID,
-				"uid":        data["uid"],
-				"nombre":     data["nombre"],
-				"apellido":   data["apellido"],
-				"email":      data["email"],
-				"dni":        data["dni"],
-				"edad":       data["edad"],
-				"planes":     data["planes"],
-				"estado":     data["estado"],
-				"adherentes": data["adherentes"],
-			})
+		var ultimoDNI string
+		for rows.Next() {
+			s, err := scanSocio(rows)
+			if err != nil {
+				continue
+			}
+			socios = append(socios, socioPublico(s, false))
+			ultimoDNI = s.DNI
 		}
 
-		// nextCursor: el ID del último doc de esta página, para pedir la siguiente
-		var nextCursor string
-		hasMore := len(docs) == limit
+		hasMore := len(socios) == limit
+		nextCursor := ""
 		if hasMore {
-			nextCursor = docs[len(docs)-1].Ref.ID
+			nextCursor = ultimoDNI
 		}
 
 		respuesta := map[string]interface{}{
@@ -479,7 +456,7 @@ func ListarSocios(fsClient *firestore.Client) http.HandlerFunc {
 	}
 }
 
-func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
+func ActualizarEstadoSocio() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodPut {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -509,24 +486,29 @@ func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
 		ctx := context.Background()
 
 		// Leemos el estado ACTUAL antes de pisarlo, para saber qué restar del contador
-		docActual, err := fsClient.Collection("socios").Doc(input.ID).Get(ctx)
+		socioActual, err := leerSocioPorDNI(ctx, input.ID)
 		if err != nil {
 			http.Error(w, "error obteniendo socio actual", http.StatusInternalServerError)
 			return
 		}
-		estadoAnterior, _ := docActual.Data()["estado"].(string)
+		estadoAnterior := socioActual.Estado
 
-		updates := []firestore.Update{
-			{Path: "estado", Value: input.Estado},
-		}
-
+		query := `UPDATE socios SET estado = $2, actualizado_en = now()`
+		var args []interface{} = []interface{}{input.ID, input.Estado}
 		if input.Adherentes != nil {
-			updates = append(updates, firestore.Update{Path: "adherentes", Value: input.Adherentes})
+			adherentesJSON, err := json.Marshal(input.Adherentes)
+			if err != nil {
+				http.Error(w, "adherentes inválidos", http.StatusBadRequest)
+				return
+			}
+			query += `, adherentes = $3`
+			args = append(args, adherentesJSON)
 		}
+		query += ` WHERE dni = $1`
 
-		_, err = fsClient.Collection("socios").Doc(input.ID).Update(ctx, updates)
+		_, err = PGPool.Exec(ctx, query, args...)
 		if err != nil {
-			http.Error(w, "error al actualizar en firestore: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "error al actualizar el socio: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -559,7 +541,7 @@ func ActualizarEstadoSocio(fsClient *firestore.Client) http.HandlerFunc {
 	}
 }
 
-func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
+func ActualizarEstadoPlan() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut && r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -597,35 +579,23 @@ func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 
-		ref := fsClient.Collection("socios").Doc(socioID)
-
-		doc, err := ref.Get(ctx)
-		if err != nil || !doc.Exists() {
+		socio, err := leerSocioPorDNI(ctx, socioID)
+		if err != nil {
 			http.Error(w, "socio no encontrado", http.StatusNotFound)
 			return
 		}
 
-		data := doc.Data()
-
-		planesRaw, ok := data["planes"].([]interface{})
-		if !ok {
+		var planes []map[string]interface{}
+		if err := json.Unmarshal(socio.Planes, &planes); err != nil {
 			http.Error(w, "el socio no tiene planes válidos", http.StatusInternalServerError)
 			return
 		}
 
 		encontrado := false
-
-		for i, planRaw := range planesRaw {
-			plan, ok := planRaw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
+		for _, plan := range planes {
 			nombre, _ := plan["nombre"].(string)
-
 			if nombre == input.Plan {
 				plan["estado"] = input.Estado
-				planesRaw[i] = plan
 				encontrado = true
 				break
 			}
@@ -636,13 +606,16 @@ func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
 			return
 		}
 
-		_, err = ref.Update(ctx, []firestore.Update{
-			{
-				Path:  "planes",
-				Value: planesRaw,
-			},
-		})
+		planesJSON, err := json.Marshal(planes)
+		if err != nil {
+			http.Error(w, "error actualizando plan: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
+		_, err = PGPool.Exec(ctx,
+			`UPDATE socios SET planes = $2, actualizado_en = now() WHERE dni = $1`,
+			socioID, planesJSON,
+		)
 		if err != nil {
 			http.Error(w, "error actualizando plan: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -654,6 +627,7 @@ func ActualizarEstadoPlan(fsClient *firestore.Client) http.HandlerFunc {
 		})
 	}
 }
+
 func ListarHistorial() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -695,7 +669,7 @@ func ListarHistorial() http.HandlerFunc {
 	}
 }
 
-func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
+func ImportarSociosCSV() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -725,11 +699,11 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		bulkWriter := fsClient.BulkWriter(ctx)
 
 		procesados, omitidos := 0, 0
 		nuevosActivos, nuevosInactivos := 0, 0
 
+		var filas []socioCSVRow
 		var procesadosDNIs []string
 		var procesadosEmails []string
 
@@ -764,10 +738,10 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 				email = "" // preferí guardarlo vacío antes que romper el import por un mail mal cargado en Wix
 			}
 
-			var planesData []interface{}
+			var planes []map[string]interface{}
 			for _, plan := range planColumnas {
 				if get(plan) == "true" {
-					planesData = append(planesData, map[string]interface{}{
+					planes = append(planes, map[string]interface{}{
 						"nombre": plan,
 						"estado": "activo",
 					})
@@ -776,23 +750,16 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 
 			estado := mapearEstado(get("Estado de Afiliación"))
 
-			socioDoc := map[string]interface{}{
-				"dni":       dni,
-				"nombre":    nombre,
-				"apellido":  apellido,
-				"email":     email,
-				"telefono":  get("Telefono"),
-				"direccion": get("Dirección"),
-				"planes":    planesData,
-				"estado":    estado,
-			}
-
-			ref := fsClient.Collection("socios").Doc(dni)
-			if _, err := bulkWriter.Set(ref, socioDoc, firestore.MergeAll); err != nil {
-				log.Printf("error encolando socio %s: %v", dni, err)
-				omitidos++
-				continue
-			}
+			filas = append(filas, socioCSVRow{
+				dni:       dni,
+				nombre:    nombre,
+				apellido:  apellido,
+				email:     email,
+				telefono:  get("Telefono"),
+				direccion: get("Dirección"),
+				planes:    planes,
+				estado:    estado,
+			})
 
 			procesados++
 			procesadosDNIs = append(procesadosDNIs, dni)
@@ -804,7 +771,12 @@ func ImportarSociosCSV(fsClient *firestore.Client) http.HandlerFunc {
 			}
 		}
 
-		bulkWriter.End()
+		if len(filas) > 0 {
+			if err := upsertSociosCSV(ctx, filas); err != nil {
+				http.Error(w, "error guardando socios en la base", http.StatusInternalServerError)
+				return
+			}
+		}
 
 		nuevos := 0
 		if len(procesadosDNIs) > 0 {

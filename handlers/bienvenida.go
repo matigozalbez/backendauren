@@ -16,8 +16,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"cloud.google.com/go/firestore"
 )
 
 // dnisConocidos devuelve el set de DNIs que ya existen en socios_conocidos.
@@ -78,10 +76,10 @@ func insertConocidos(ctx context.Context, columns []string, rows [][]interface{}
 	return int(tag.RowsAffected()), nil
 }
 
-// BackfillSociosConocidos registra los socios ya existentes en Firestore como
+// BackfillSociosConocidos registra los socios ya existentes en PostgreSQL como
 // "ya vistos" (mail_bienvenida_enviado_at = now()) para que no reciban el mail
 // de bienvenida con retroactividad. Se corre UNA sola vez al activar la feature.
-func BackfillSociosConocidos(fsClient *firestore.Client) http.HandlerFunc {
+func BackfillSociosConocidos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -92,44 +90,65 @@ func BackfillSociosConocidos(fsClient *firestore.Client) http.HandlerFunc {
 		const pageSize = 500
 
 		registrados := 0
-		var cursor *firestore.DocumentSnapshot
+		lastDNI := ""
 
 		for {
-			query := fsClient.Collection("socios").
-				OrderBy(firestore.DocumentID, firestore.Asc).
-				Limit(pageSize)
-			if cursor != nil {
-				query = query.StartAfter(cursor)
-			}
-
-			docs, err := query.Documents(ctx).GetAll()
+			rows, err := PGPool.Query(ctx, `
+				SELECT COALESCE(dni,''), COALESCE(email,'')
+				FROM socios
+				WHERE dni > $1
+				ORDER BY dni ASC
+				LIMIT $2`, lastDNI, pageSize,
+			)
 			if err != nil {
 				http.Error(w, "error leyendo socios", http.StatusInternalServerError)
 				return
 			}
-			if len(docs) == 0 {
+
+			type fila struct {
+				dni   string
+				email string
+			}
+			var lista []fila
+			for rows.Next() {
+				var f fila
+				if err := rows.Scan(&f.dni, &f.email); err != nil {
+					log.Printf("ERROR scaneando socio en backfill: %v", err)
+					continue
+				}
+				lista = append(lista, f)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				http.Error(w, "error leyendo socios", http.StatusInternalServerError)
+				return
+			}
+
+			if len(lista) == 0 {
 				break
 			}
 
-			rows := make([][]interface{}, 0, len(docs))
-			for _, doc := range docs {
-				data := doc.Data()
-				email, _ := data["email"].(string)
-				if email == "" {
-					continue
+			raw := make([][]interface{}, 0, len(lista))
+			for _, f := range lista {
+				if f.email != "" {
+					raw = append(raw, []interface{}{f.dni, f.email})
 				}
-				rows = append(rows, []interface{}{doc.Ref.ID, email})
 			}
 
-			if n, err := insertConocidosConEnvio(ctx, rows); err != nil {
-				http.Error(w, "error registrando socios en PG", http.StatusInternalServerError)
-				return
-			} else {
-				registrados += n
+			if len(raw) > 0 {
+				if n, err := insertConocidosConEnvio(ctx, raw); err != nil {
+					http.Error(w, "error registrando socios en PG", http.StatusInternalServerError)
+					return
+				} else {
+					registrados += n
+				}
 			}
 
-			cursor = docs[len(docs)-1]
-			if len(docs) < pageSize {
+			// lastDNI avanza con TODA la página leída, no solo con las filas que
+			// tenían email. Si una página entera venía con email NULL, el loop
+			// terminaba acá y los socios siguientes nunca se registraban.
+			lastDNI = lista[len(lista)-1].dni
+			if len(lista) < pageSize {
 				break
 			}
 		}
@@ -183,7 +202,7 @@ func EnviarBienvenidas() http.HandlerFunc {
 		defer cancel()
 
 		rows, err := PGPool.Query(ctx, `
-			SELECT dni, email
+			SELECT COALESCE(dni,''), COALESCE(email,'')
 			FROM socios_conocidos
 			WHERE mail_bienvenida_enviado_at IS NULL AND email <> ''
 			LIMIT 100`)
@@ -202,9 +221,15 @@ func EnviarBienvenidas() http.HandlerFunc {
 		for rows.Next() {
 			var p pendiente
 			if err := rows.Scan(&p.dni, &p.email); err != nil {
+				log.Printf("ERROR scaneando pendiente de bienvenida: %v", err)
 				continue
 			}
 			lista = append(lista, p)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("ERROR iterando pendientes de bienvenida: %v", err)
+			http.Error(w, "error leyendo pendientes", http.StatusInternalServerError)
+			return
 		}
 
 		enviados, fallidos := 0, 0

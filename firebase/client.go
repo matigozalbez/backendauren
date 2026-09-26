@@ -4,14 +4,12 @@ import (
 	"context"
 	"log"
 
-	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	"firebase.google.com/go/v4/messaging"
 	"google.golang.org/api/option"
 )
 
-var Client *firestore.Client
 var AuthClient *auth.Client
 var MessagingClient *messaging.Client
 
@@ -22,12 +20,6 @@ func Init() {
 	if err != nil {
 		log.Fatalf("error inicializando firebase: %v", err)
 	}
-
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		log.Fatalf("error conectando firestore: %v", err)
-	}
-	Client = client
 
 	authClient, err := app.Auth(ctx)
 	if err != nil {

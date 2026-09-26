@@ -7,12 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 	"io"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
 )
 
@@ -23,7 +23,7 @@ type CrearAdminInput struct {
 	Rol      string `json:"rol"` // informativo — el permiso real lo da el custom claim
 }
 
-func CrearAdmin(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -83,14 +83,22 @@ func CrearAdmin(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
-		_, err = fsClient.Collection("admins").Doc(userRecord.UID).Set(ctx, map[string]interface{}{
-			"nombre":   input.Nombre,
-			"apellido": input.Apellido,
-			"email":    input.Email,
-			"rol":      input.Rol,
-			"creadoEn": firestore.ServerTimestamp,
-		})
-		if err != nil {
+		rol := input.Rol
+		if rol == "" {
+			rol = "admin"
+		}
+
+		if _, err := PGPool.Exec(ctx, `
+			INSERT INTO admins (uid, nombre, apellido, email, rol)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (uid) DO UPDATE SET
+				nombre = EXCLUDED.nombre,
+				apellido = EXCLUDED.apellido,
+				email = EXCLUDED.email,
+				rol = EXCLUDED.rol`,
+			userRecord.UID, input.Nombre, input.Apellido, input.Email, rol,
+		); err != nil {
+			log.Printf("ERROR guardando admin %s: %v", userRecord.UID, err)
 			http.Error(w, "usuario creado, pero falló al guardar el registro en admins", http.StatusInternalServerError)
 			return
 		}

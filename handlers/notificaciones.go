@@ -3,12 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/messaging"
 )
 
@@ -20,7 +18,7 @@ type CrearNotificacionRequest struct {
 	Plan    string `json:"plan,omitempty"`    // requerido si tipo == "plan"
 }
 
-func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) http.HandlerFunc {
+func CrearNotificacion(msgClient *messaging.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -39,26 +37,21 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 		}
 
 		ctx := context.Background()
-		expiresAt := time.Now().AddDate(0, 0, 30) // Expira en 30 días para el TTL de Firestore
+		expiresAt := time.Now().AddDate(0, 0, 30)
 
-		// 1. Guardar la notificación en Firestore (según corresponda)
-		notifDoc := map[string]interface{}{
-			"titulo":    req.Titulo,
-			"mensaje":   req.Mensaje,
-			"fecha":     time.Now(),
-			"expiresAt": expiresAt,
-			"tipo":      req.Tipo,
-			"activa":    true,
-		}
+		// 1. Guardar la notificación en PostgreSQL (según corresponda)
+		query := `INSERT INTO notificaciones (titulo, mensaje, fecha, expires_at, tipo, activa, user_id, plan)
+				  VALUES ($1, $2, now(), $3, $4, TRUE, $5, $6)`
 
+		var userID, plan *string
 		if req.Tipo == "usuario" {
-			notifDoc["user_id"] = req.UserID
+			userID = &req.UserID
 		} else if req.Tipo == "plan" {
-			notifDoc["plan"] = req.Plan
+			plan = &req.Plan
 		}
 
-		_, _, err := fsClient.Collection("notificaciones").Add(ctx, notifDoc)
-		if err != nil {
+		if _, err := PGPool.Exec(ctx, query, req.Titulo, req.Mensaje, expiresAt, req.Tipo, userID, plan); err != nil {
+			log.Printf("error creando notificación en PG: %v", err)
 			http.Error(w, "error creando notificación en db", http.StatusInternalServerError)
 			return
 		}
@@ -68,16 +61,17 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 
 		switch req.Tipo {
 		case "general":
-			tokensSnap, err := fsClient.Collection("push_tokens").Documents(ctx).GetAll()
+			rows, err := PGPool.Query(ctx, `SELECT token FROM push_tokens WHERE token <> ''`)
 			if err != nil {
 				log.Printf("error consultando tokens generales: %v", err)
 			} else {
-				for _, doc := range tokensSnap {
-					data := doc.Data()
-					if t, ok := data["token"].(string); ok && t != "" {
+				for rows.Next() {
+					var t string
+					if err := rows.Scan(&t); err == nil && t != "" {
 						tokens = append(tokens, t)
 					}
 				}
+				rows.Close()
 			}
 
 		case "usuario":
@@ -85,25 +79,15 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 				http.Error(w, "user_id es requerido para notificaciones de usuario", http.StatusBadRequest)
 				return
 			}
-			fmt.Println("--- BUSCANDO USUARIO --- ID:", req.UserID)
 
-			docSnap, err := fsClient.Collection("push_tokens").Doc(req.UserID).Get(ctx)
+			var token string
+			err := PGPool.QueryRow(ctx,
+				`SELECT token FROM push_tokens WHERE uid = $1`, req.UserID,
+			).Scan(&token)
 			if err != nil {
-				fmt.Println("Error buscando doc en Firestore:", err)
-			}
-
-			if err == nil && docSnap.Exists() {
-				data := docSnap.Data()
-				fmt.Println("¡Doc encontrado! Datos:", data)
-
-				if t, ok := data["token"].(string); ok && t != "" {
-					fmt.Println("Token extraído OK:", t)
-					tokens = append(tokens, t)
-				} else {
-					fmt.Println("El campo 'token' no existe o no es string. Data:", data)
-				}
-			} else {
-				fmt.Println("El documento NO existe para el ID:", req.UserID)
+				log.Printf("ERROR: no se encontró push token para uid=%s: %v", req.UserID, err)
+			} else if token != "" {
+				tokens = append(tokens, token)
 			}
 
 		case "plan":
@@ -111,24 +95,20 @@ func CrearNotificacion(fsClient *firestore.Client, msgClient *messaging.Client) 
 				http.Error(w, "plan es requerido para notificaciones por plan", http.StatusBadRequest)
 				return
 			}
-			fmt.Println("--- BUSCANDO POR PLAN --- Plan solicitado:", req.Plan)
-
-			tokensSnap, err := fsClient.Collection("push_tokens").Where("planes", "array-contains", req.Plan).Documents(ctx).GetAll()
+			planJSON, _ := json.Marshal([]string{req.Plan})
+			rows, err := PGPool.Query(ctx,
+				`SELECT token FROM push_tokens WHERE planes @> $1::jsonb`, string(planJSON),
+			)
 			if err != nil {
-				fmt.Println("Error consultando tokens por plan en Firestore:", err)
+				log.Printf("error consultando tokens por plan: %v", err)
 			} else {
-				fmt.Printf("Documentos encontrados con el plan '%s': %d\n", req.Plan, len(tokensSnap))
-				for _, doc := range tokensSnap {
-					data := doc.Data()
-					fmt.Println("Revisando doc ID:", doc.Ref.ID, "-> Data:", data)
-
-					if t, ok := data["token"].(string); ok && t != "" {
-						fmt.Println("Token extraído OK para plan:", t)
+				for rows.Next() {
+					var t string
+					if err := rows.Scan(&t); err == nil && t != "" {
 						tokens = append(tokens, t)
-					} else {
-						fmt.Println("El campo 'token' no existe o no es string en este doc de plan. Data:", data)
 					}
 				}
+				rows.Close()
 			}
 
 		default:

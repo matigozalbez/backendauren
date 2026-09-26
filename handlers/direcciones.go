@@ -9,8 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-
-	"cloud.google.com/go/firestore"
 )
 
 // normalizarDireccion normaliza una dirección para clave de cache/doc:
@@ -42,7 +40,7 @@ type guardarDireccionResponse struct {
 	CacheHit         bool    `json:"cache_hit"`
 }
 
-func GuardarDireccion(fsClient *firestore.Client) http.HandlerFunc {
+func GuardarDireccion() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
@@ -140,7 +138,7 @@ type buscarDireccionResult struct {
 	Fuente      string  `json:"fuente"`
 }
 
-func BuscarDirecciones(fsClient *firestore.Client) http.HandlerFunc {
+func BuscarDirecciones() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)

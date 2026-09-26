@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"aurenbackend/middleware"
 	"aurenbackend/utils"
@@ -29,7 +30,6 @@ func main() {
 	defer ClosePG()
 
 	mux := http.NewServeMux()
-	handlers.FirestoreClient = firebase.Client
 	handlers.AuthClient = firebase.AuthClient
 	handlers.PGPool = PG
 
@@ -38,7 +38,7 @@ func main() {
 	// y liberar el cupo del mes.
 	handlers.IniciarCompletadoAutomatico()
 	/*
-		if err := handlers.ReconstruirStats(firebase.Client); err != nil {
+		if err := handlers.ReconstruirStats(); err != nil {
 			log.Fatal(err)
 		}
 	*/
@@ -64,7 +64,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/vincular-socio", func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +73,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.VincularSocio(firebase.Client, firebase.AuthClient)(w, r)
+		handlers.VincularSocio(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/mi-socio", func(w http.ResponseWriter, r *http.Request) {
@@ -82,16 +82,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.MiSocio(firebase.Client, firebase.AuthClient)(w, r)
-	})
-
-	mux.HandleFunc("/api/crear-usuario", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w, r)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		handlers.CrearUsuario(firebase.Client, firebase.AuthClient)(w, r)
+		handlers.MiSocio(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/verificar-vinculacion", func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +91,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.VerificarVinculacion(firebase.Client, firebase.AuthClient)(w, r)
+		handlers.VerificarVinculacion(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/medicamentos", func(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +103,19 @@ func main() {
 		handlers.Medicamentos(w, r) // antes decía handlers.Medicamento — con "s" al final
 	})
 
+	// Frena el pedido masivo de códigos hacia un mismo DNI (spam de mail al
+	// socio y consumo de la cuenta de Resend). 3 por hora: pedir más es
+	// imposible en un flujo normal. Cuenta por DNI, no por IP, porque el
+	// abuso es contra un socio y las IPs se comparten detrás de CGNAT.
+	limiterCodigos := middleware.NuevoRateLimiterDNI(3, time.Hour)
+
 	mux.HandleFunc("/api/afiliados/solicitar-codigo", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.SolicitarCodigo(w, r) // antes decía handlers.Medicamento — con "s" al final
+		limiterCodigos.Middleware(handlers.SolicitarCodigo)(w, r)
 	})
 
 	mux.HandleFunc("/api/afiliados/verificar-codigo", func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +143,7 @@ func main() {
 			return
 		}
 		// Acá ya le pasas el firebase.Client y firebase.MessagingClient de tu init global
-		middleware.RequireAdmin(handlers.CrearNotificacion(firebase.Client, firebase.MessagingClient))(w, r)
+		middleware.RequireAdmin(handlers.CrearNotificacion(firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-socios", func(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +152,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarSocios(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarSocios())(w, r)
 	})
 
 	mux.HandleFunc("/api/notificaciones", func(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +161,16 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.ObtenerNotificaciones(firebase.Client, firebase.AuthClient)(w, r)
+		handlers.ObtenerNotificaciones(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/push-token", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.RegistrarPushToken(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +179,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearOActualizarCatalogoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.CrearOActualizarCatalogoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/obtener-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +188,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ObtenerCatalogoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ObtenerCatalogoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/socios/beneficios", func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +197,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarBeneficiosSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarBeneficiosSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +206,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarCatalogoPlanes(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ListarCatalogoPlanes())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-socio/", func(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +215,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarEstadoSocio(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarEstadoSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-estadoplan/", func(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +224,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarEstadoPlan(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ActualizarEstadoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/planes/detalle", func(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +237,7 @@ func main() {
 			return
 		}
 
-		handlers.ObtenerCatalogoPlan(firebase.Client)(w, r)
+		handlers.ObtenerCatalogoPlan()(w, r)
 	})
 
 	mux.HandleFunc("/api/afiliados/cambiar-password", func(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +327,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.AsignarClinica(firebase.Client, firebase.MessagingClient))(w, r)
+		middleware.RequireAdmin(handlers.AsignarClinica(firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +338,7 @@ func main() {
 			return
 		}
 
-		handlers.CrearTurno(firebase.Client, firebase.AuthClient)(w, r)
+		handlers.CrearTurno(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-turnos", func(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +374,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.GuardarDireccion(firebase.Client)(w, r)
+		handlers.GuardarDireccion()(w, r)
 	})
 
 	mux.HandleFunc("/api/direcciones/buscar", func(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +383,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.BuscarDirecciones(firebase.Client)(w, r)
+		handlers.BuscarDirecciones()(w, r)
 	})
 
 	mux.HandleFunc("/api/ciudades/buscar", func(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +403,6 @@ func main() {
 		}
 		middleware.RequireAdmin(
 			handlers.AsignarMedico(
-				firebase.Client,
 				firebase.MessagingClient,
 			),
 		)(w, r)
@@ -502,7 +507,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearAdmin(firebase.Client, firebase.AuthClient))(w, r)
+		middleware.RequireAdmin(handlers.CrearAdmin(firebase.AuthClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-historial-turnos", func(w http.ResponseWriter, r *http.Request) {
@@ -551,7 +556,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ImportarSociosCSV(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.ImportarSociosCSV())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/enviar-bienvenidas", func(w http.ResponseWriter, r *http.Request) {
@@ -569,12 +574,17 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.BackfillSociosConocidos(firebase.Client))(w, r)
+		middleware.RequireAdmin(handlers.BackfillSociosConocidos())(w, r)
 	})
 
-	mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
+	// El stress test quemaba CPU a propósito (500k iteraciones por request).
+	// Público en prod es un DoS, así que queda apagado salvo que lo pidas
+	// explícitamente con ENABLE_STRESS_TEST=true.
+	if os.Getenv("ENABLE_STRESS_TEST") == "true" {
+		mux.HandleFunc("GET /api/test-stress", handlers.HandleTestStress)
+	}
 
-	http.HandleFunc("/api/ping", pingHandler)
+	mux.HandleFunc("/api/ping", pingHandler)
 	utils.StartMetricsMonitor()
 	port := os.Getenv("PORT")
 	if port == "" {

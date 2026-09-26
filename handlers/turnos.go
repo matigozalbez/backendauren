@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/auth"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -41,13 +40,13 @@ var franjasPreferidasValidas = map[string]bool{
 	"noche":  true,
 }
 type Adherente struct {
-	Dni        string `firestore:"dni"`
-	Nombre     string `firestore:"nombre"`
-	Apellido   string `firestore:"apellido"`
-	Parentesco string `firestore:"parentesco"`
+	Dni        string `json:"dni"`
+	Nombre     string `json:"nombre"`
+	Apellido   string `json:"apellido"`
+	Parentesco string `json:"parentesco"`
 }
 
-func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.HandlerFunc {
+func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -135,20 +134,19 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			}
 		}
 
-		// El socio se lee de Firestore (datos sensibles que NO migran a PG).
+		// El socio se lee de PostgreSQL (tabla socios).
 		// El turno en cambio se guarda en PostgreSQL.
 
 		ctx := context.Background()
 
 		// Buscamos al socio (titular) por su uid de Firebase, NO confiamos en un DNI que mande el front.
-		iter := fsClient.Collection("socios").Where("uid", "==", uid).Limit(1).Documents(ctx)
-		snap, err := iter.Next()
+		socio, err := leerSocioPorUID(ctx, uid)
 		if err != nil {
 			http.Error(w, "no se encontró el socio asociado a esta cuenta", http.StatusNotFound)
 			return
 		}
 
-		socioData := snap.Data()
+		socioData := socio.Data()
 
 		// Los turnos y estudios médicos son servicios exclusivos de Auren Salud.
 		// Se valida el estado del socio y el del plan antes de crear el turno.
@@ -158,10 +156,10 @@ func CrearTurno(fsClient *firestore.Client, authClient *auth.Client) http.Handle
 			return
 		}
 
-		socioDni, _ := socioData["dni"].(string)
-		socioNombre, _ := socioData["nombre"].(string)
-		socioApellido, _ := socioData["apellido"].(string)
-		socioEmail, _ := socioData["email"].(string)
+		socioDni := socio.DNI
+		socioNombre := socio.Nombre
+		socioApellido := socio.Apellido
+		socioEmail := socio.Email
 		nombreCompleto := strings.TrimSpace(socioNombre + " " + socioApellido)
 
 		// Datos que van al documento del turno. Por defecto es para el titular.

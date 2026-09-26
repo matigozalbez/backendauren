@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4/messaging"
+	"github.com/jackc/pgx/v5"
 )
 
 // ---------- Listar turnos (admin) ----------
@@ -113,7 +114,6 @@ type AsignarMedicoInput struct {
 }
 
 func AsignarMedico(
-	fsClient *firestore.Client,
 	msgClient *messaging.Client,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -188,12 +188,21 @@ func AsignarMedico(
 		defer cancel()
 
 		err = PGPool.QueryRow(queryCtx,
-			`SELECT nombre, apellido, direccion, ciudad, provincia FROM medicos WHERE dni = $1`,
+			`SELECT COALESCE(nombre,''), COALESCE(apellido,''), COALESCE(direccion,''),
+			        COALESCE(ciudad,''), COALESCE(provincia,'')
+			 FROM medicos WHERE dni = $1`,
 			input.MedicoID,
 		).Scan(&medicoNombre, &medicoApellido, &medicoDireccion, &medicoCiudad, &medicoProvincia)
 
 		if err != nil {
-			http.Error(w, "médico no encontrado", http.StatusNotFound)
+			// Un 404 real es que no existe; cualquier otro error (columna NULL,
+			// tipo, red) antes devolvía el mismo 404 y escondía el problema real.
+			if errors.Is(err, pgx.ErrNoRows) {
+				http.Error(w, "médico no encontrado", http.StatusNotFound)
+				return
+			}
+			log.Printf("ERROR obteniendo médico %s: %v", input.MedicoID, err)
+			http.Error(w, "error obteniendo médico", http.StatusInternalServerError)
 			return
 		}
 
@@ -295,10 +304,10 @@ func AsignarMedico(
 		
 		if uid != "" && msgClient != nil {
 
-			tokenSnap, err := fsClient.
-				Collection("push_tokens").
-				Doc(uid).
-				Get(ctx)
+			var token string
+			err := PGPool.QueryRow(ctx,
+				`SELECT token FROM push_tokens WHERE uid = $1`, uid,
+			).Scan(&token)
 
 			if err != nil {
 				log.Printf(
@@ -306,13 +315,7 @@ func AsignarMedico(
 					uid,
 					err,
 				)
-			} else {
-
-				tokenData := tokenSnap.Data()
-
-				token, _ := tokenData["token"].(string)
-
-				if token != "" {
+			} else if token != "" {
 
 					push := &messaging.Message{
 						Token: token,
@@ -352,7 +355,6 @@ func AsignarMedico(
 					)
 				}
 			}
-		}
 
 		// =========================================================
 		// 5. EMAIL CON RESEND
