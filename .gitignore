@@ -10,3 +10,12 @@ AGENTS.md
 pg_test.bat
 migracion_pg.sql
 PLAN_MIGRACION.md
+
+# Binarios compilados y logs: no van al repo.
+aurenbackend
+aurenback
+backe
+backend.log
+server.log
+*.log
+*.exe
