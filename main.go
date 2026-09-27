@@ -104,10 +104,15 @@ func main() {
 	})
 
 	// Frena el pedido masivo de códigos hacia un mismo DNI (spam de mail al
-	// socio y consumo de la cuenta de Resend). 3 por hora: pedir más es
-	// imposible en un flujo normal. Cuenta por DNI, no por IP, porque el
-	// abuso es contra un socio y las IPs se comparten detrás de CGNAT.
-	limiterCodigos := middleware.NuevoRateLimiterDNI(3, time.Hour)
+	// socio y consumo de la cuenta de Resend). Un código por minuto: en un
+	// flujo normal nunca hace falta más, y llega el código al mail enseguida.
+	// Cuenta por DNI, no por IP, porque el abuso es contra un socio y las IPs
+	// se comparten detrás de CGNAT.
+	limiterCodigos := middleware.NuevoCooldownDNI(time.Minute)
+
+	// El cambio de contraseña martilleado sirve para lo mismo: generar
+	// requests sin parar contra un DNI. Mismo cooldown que el envío de código.
+	limiterCambioPassword := middleware.NuevoCooldownDNI(time.Minute)
 
 	mux.HandleFunc("/api/afiliados/solicitar-codigo", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -246,7 +251,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		handlers.CambiarPassword(w, r)
+		limiterCambioPassword.Middleware(handlers.CambiarPassword)(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/crear-medico", func(w http.ResponseWriter, r *http.Request) {

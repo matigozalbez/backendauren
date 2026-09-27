@@ -3,56 +3,55 @@ package middleware
 import (
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-type dniBucket struct {
-	contador int
-	ventana  time.Time
-}
-
-// RateLimiterDNI limita por DNI con una ventana fija.
+// CooldownDNI frena el pedido masivo hacia un mismo DNI: un cooldown de N
+// segundos entre cada solicitud.
 //
-// Se cuenta por DNI y no por IP a propósito: el abuso que se quiere frenar
-// es el spam de códigos hacia un socio concreto, y ese abuso es contra un
-// DNI, no contra una IP. Contar por IP no sirve porque los móviles en
-// Argentina salen por CGNAT (miles de personas detrás de la misma IP
-// pública), así que castiga a socios legítimos, y tampoco sirve como
-// defensa porque un atacante con varias IP lo esquiva girando.
+// Se cuenta por DNI y no por IP a propósito. El abuso que se quiere frenar es
+// el spam de códigos hacia un socio concreto, y ese abuso es contra un DNI, no
+// contra una IP. Contar por IP no sirve porque los móviles en Argentina salen
+// por CGNAT (miles de personas detrás de la misma IP pública), así que
+// castiga a socios legítimos, y tampoco sirve como defensa porque un atacante
+// con varias IP lo esquiva girando.
+//
+// Se guarda la hora del último request y no un contador. Para "uno cada 60
+// segundos" el contador sobra, y además la ventana fija que usaba antes tenía
+// un defecto: dos requests pegados justo en el borde de la ventana pasaban los
+// dos. Con la hora del último request eso no puede pasar.
 //
 // El cuerpo se lee y se vuelve a poner para que el handler de fondo pueda
 // decodificar el JSON normalmente.
-type RateLimiterDNI struct {
-	mu      sync.Mutex
-	buckets map[string]*dniBucket
-	limite  int
-	ventana time.Duration
+type CooldownDNI struct {
+	mu       sync.Mutex
+	ultimos  map[string]time.Time
+	cooldown time.Duration
 }
 
-func NuevoRateLimiterDNI(limite int, ventana time.Duration) *RateLimiterDNI {
-	return &RateLimiterDNI{
-		buckets: make(map[string]*dniBucket),
-		limite:  limite,
-		ventana: ventana,
+func NuevoCooldownDNI(cooldown time.Duration) *CooldownDNI {
+	return &CooldownDNI{
+		ultimos:  make(map[string]time.Time),
+		cooldown: cooldown,
 	}
 }
 
-// cleanup purga los buckets vencidos para que el mapa no crezca sin control.
-func (rl *RateLimiterDNI) cleanup(ahora time.Time) {
-	for dni, b := range rl.buckets {
-		if ahora.Sub(b.ventana) > rl.ventana {
-			delete(rl.buckets, dni)
+// cleanup purga las entradas vencidas para que el mapa no crezca sin control.
+func (rl *CooldownDNI) cleanup(ahora time.Time) {
+	for dni, ultimo := range rl.ultimos {
+		if ahora.Sub(ultimo) >= rl.cooldown {
+			delete(rl.ultimos, dni)
 		}
 	}
 }
 
 // dniDelRequest normaliza el DNI para que " 30120897 " y "30120897" cuenten
-// como el mismo. Si no hay DNI legible, devuelve cadena vacía y la
-//iddleware deja pasar (el handler se encarga de responder 400).
+// como el mismo. Si no hay DNI legible, devuelve cadena vacía y la middleware
+// deja pasar (el handler se encarga de responder 400).
 func dniDelRequest(r *http.Request) string {
 	if r.Body == nil {
 		return ""
@@ -72,7 +71,7 @@ func dniDelRequest(r *http.Request) string {
 	return strings.TrimSpace(req.DNI)
 }
 
-func (rl *RateLimiterDNI) Middleware(next http.HandlerFunc) http.HandlerFunc {
+func (rl *CooldownDNI) Middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dni := dniDelRequest(r)
 
@@ -85,63 +84,29 @@ func (rl *RateLimiterDNI) Middleware(next http.HandlerFunc) http.HandlerFunc {
 		ahora := time.Now()
 
 		rl.mu.Lock()
-		if len(rl.buckets) > 5000 {
+		if len(rl.ultimos) > 5000 {
 			rl.cleanup(ahora)
 		}
-		b, ok := rl.buckets[dni]
-		if !ok {
-			b = &dniBucket{ventana: ahora}
-			rl.buckets[dni] = b
+		ultimo, ok := rl.ultimos[dni]
+		restante := rl.cooldown - ahora.Sub(ultimo)
+		permitido := !ok || restante <= 0
+		if permitido {
+			rl.ultimos[dni] = ahora
 		}
-		if ahora.Sub(b.ventana) >= rl.ventana {
-			b.contador = 0
-			b.ventana = ahora
-		}
-		b.contador++
-		permitido := b.contador <= rl.limite
 		rl.mu.Unlock()
 
 		if !permitido {
-			segundos := int(rl.ventana.Seconds())
-			w.Header().Set("Retry-After", itoa(segundos))
-			http.Error(w, "pediste demasiados códigos, esperá un momento", http.StatusTooManyRequests)
+			// Retry-After lleva los segundos que realmente faltan, no la
+			// ventana completa, para que el cliente pueda mostrar la espera.
+			segundos := int(restante.Seconds())
+			if segundos < 1 {
+				segundos = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(segundos))
+			http.Error(w, "esperá un momento antes de volver a pedir el código", http.StatusTooManyRequests)
 			return
 		}
 
 		next(w, r)
 	}
 }
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
-}
-
-// ipDe resuelve la IP real del cliente respetando X-Forwarded-For, que es lo
-// que Caddy manda cuando el backend escucha solo en localhost. Sin esto,
-// r.RemoteAddr es siempre 127.0.0.1 y todas las peticiones caen en el mismo
-// bucket. Solo se usa para fines de logging: no debe ser la clave de ningún
-// rate limit, porque un cliente puede mandar ese header a voluntad.
-func ipDe(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		primera := strings.TrimSpace(strings.Split(xff, ",")[0])
-		if primera != "" {
-			return primera
-		}
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
-
-var _ = ipDe

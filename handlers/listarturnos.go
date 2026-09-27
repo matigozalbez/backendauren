@@ -421,11 +421,6 @@ func enviarEmailTurnoAsignado(
 	hora string,
 ) error {
 
-	log.Printf(
-		"DEBUG: enviando email de turno asignado a=%q",
-		destinatario,
-	)
-
 	palabra := "turno"
 	if esEstudio {
 		palabra = "estudio"
@@ -514,11 +509,6 @@ func enviarEmailTurnoAsignado(
 		return err
 	}
 
-	log.Printf(
-		"DEBUG: payload Resend preparado para %s",
-		destinatario,
-	)
-
 	req, err := http.NewRequest(
 		"POST",
 		"https://api.resend.com/emails",
@@ -553,13 +543,8 @@ func enviarEmailTurnoAsignado(
 
 	body, _ := io.ReadAll(resp.Body)
 
-	log.Printf(
-		"DEBUG: Resend respondió status=%d body=%s",
-		resp.StatusCode,
-		string(body),
-	)
-
 	if resp.StatusCode >= 300 {
+		log.Printf("enviarEmailTurno: Resend devolvio status %d", resp.StatusCode)
 		return fmt.Errorf(
 			"resend devolvió status %d: %s",
 			resp.StatusCode,

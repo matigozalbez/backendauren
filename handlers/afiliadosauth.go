@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"net/http"
@@ -77,8 +76,6 @@ func enmascararMail(mail string) string {
 }
 
 func enviarCodigoPorMail(destinatario, nombre, codigo string) error {
-	log.Printf("DEBUG: intentando enviar código a destinatario=%q nombre=%q", destinatario, nombre)
-
 	payload := map[string]interface{}{
 		"from":    "Auren <admin@formulariosalud.com.ar>",
 		"to":      []string{destinatario},
@@ -89,7 +86,6 @@ func enviarCodigoPorMail(destinatario, nombre, codigo string) error {
 		),
 	}
 	jsonData, _ := json.Marshal(payload)
-	log.Printf("DEBUG: payload enviado a Resend: %s", string(jsonData))
 
 	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -101,16 +97,15 @@ func enviarCodigoPorMail(destinatario, nombre, codigo string) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("DEBUG: error de red pegándole a Resend: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("DEBUG: Resend respondió status=%d body=%s", resp.StatusCode, string(body))
-
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("resend devolvió status %d: %s", resp.StatusCode, string(body))
+		// Solo el status: ni el body ni el payload, porque el body y el
+		// payload llevan el código de verificación del socio.
+		log.Printf("enviarCodigoPorMail: Resend devolvio status %d", resp.StatusCode)
+		return fmt.Errorf("resend devolvió status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -335,8 +330,6 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 	// la que ya existe.
 	usuarioExistente, err := AuthClient.GetUserByEmail(ctx, socio.Email)
 	if err == nil && usuarioExistente != nil {
-		log.Printf("DEBUG: mail %s ya tenía cuenta en Auth (uid=%s), vinculando en vez de crear", socio.Email, usuarioExistente.UID)
-
 		// Le seteamos la password nueva a la cuenta existente
 		updateParams := (&firebaseauth.UserToUpdate{}).Password(req.Password)
 		if _, err := AuthClient.UpdateUser(ctx, usuarioExistente.UID, updateParams); err != nil {
