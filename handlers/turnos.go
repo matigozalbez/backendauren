@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +39,53 @@ var franjasPreferidasValidas = map[string]bool{
 	"mañana": true,
 	"tarde":  true,
 	"noche":  true,
+}
+
+// cupoMensualPorTipo dice cuántas solicitudes por mes calendario acepta cada
+// tipo. Es el número a tocar si cambia la política de un servicio.
+//
+// Las solicitudes con tipo grua/sepelios/domicilio se crean desde
+// /api/servicios/<tipo> (handlers/servicios.go), no desde /api/crear-turno,
+// pero el cupo se cuenta contra la misma tabla "turnos", así que el conteo es
+// compartido.
+var cupoMensualPorTipo = map[string]int{
+	"consulta":  1,
+	"estudio":   1,
+	"grua":      1,
+	"sepelios":  1,
+	"domicilio": 1,
+}
+
+// etiquetaPorTipo es cómo se llama cada tipo en los mensajes al socio.
+var etiquetaPorTipo = map[string]string{
+	"consulta":  "turno",
+	"estudio":   "estudio",
+	"grua":      "grúa",
+	"sepelios":  "servicio sepelial",
+	"domicilio": "médico a domicilio",
+}
+
+// esTipoSolicitud dice si el tipo corresponde a un servicio con solicitud
+// (grúa, sepelios, médico a domicilio). Esos servicios tienen su propio
+// endpoint de alta y su propio gate de plan, así que no entran por
+// /api/crear-turno.
+func esTipoSolicitud(tipo string) bool {
+	_, ok := definicionesPorTipo[tipo]
+	return ok
+}
+
+// tiposDeServicio devuelve los tipos que se gestionan en el panel de servicios
+// (grúa, sepelios y médico a domicilio), ordenados para que las queries sean
+// estables. Se usa para:
+//   - listarlos en /api/admin/servicios
+//   - excluirlos de /api/admin/listar-turnos, que es solo de turnos y estudios
+func tiposDeServicio() []string {
+	tipos := make([]string, 0, len(definicionesPorTipo))
+	for t := range definicionesPorTipo {
+		tipos = append(tipos, t)
+	}
+	sort.Strings(tipos)
+	return tipos
 }
 type Adherente struct {
 	Dni        string `json:"dni"`
@@ -73,6 +121,14 @@ func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 		if input.Tipo == "" {
 			input.Tipo = "consulta"
 		}
+
+		// Los servicios con solicitud (grúa, sepelios, médico a domicilio) no
+		// entran por acá: cada uno tiene su endpoint y su propio gate de plan.
+		// Solo pasan por /api/crear-turno los turnos de consulta y estudio.
+		if esTipoSolicitud(input.Tipo) {
+			http.Error(w, "tipo inválido, ese servicio tiene su propio canal de solicitud", http.StatusBadRequest)
+			return
+		}
 		if input.Tipo != "consulta" && input.Tipo != "estudio" {
 			http.Error(w, "tipo inválido, debe ser 'consulta' o 'estudio'", http.StatusBadRequest)
 			return
@@ -83,7 +139,7 @@ func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 		usados, errUso := turnosUsadosEnMes(usoCtx, uid, input.Tipo)
 		if errUso != nil {
 			log.Printf("ERROR verificando cupo del mes para %s (%s): %v", uid, input.Tipo, errUso)
-		} else if usados >= 1 {
+		} else if usados >= cupoMensualPorTipo[input.Tipo] {
 			responderSinCupo(w, input.Tipo)
 			return
 		}
@@ -276,16 +332,36 @@ func turnosUsadosEnMes(ctx context.Context, uid string, tipo string) (int, error
 
 // responderSinCupo responde el 429 con mensaje claro para la app.
 func responderSinCupo(w http.ResponseWriter, tipo string) {
-	label := "turno"
-	if tipo == "estudio" {
-		label = "estudio"
+	label, ok := etiquetaPorTipo[tipo]
+	if !ok {
+		label = "turno"
 	}
+
+	// El front mira este código para mostrar "ya usaste tu X de este mes"
+	// (SolicitudTurno.tsx / SolicitudTurno*). No cambiarlo sin tocar el front.
+	codigo := "TURNO_MES_AGOTADO"
+	if esTipoSolicitud(tipo) {
+		codigo = "SERVICIO_MES_AGOTADO"
+	}
+
+	mensaje := fmt.Sprintf(
+		"Ya utilizaste tu %s de este mes. Hay disponibilidad desde el 1º del próximo mes.",
+		label,
+	)
+	if esTipoSolicitud(tipo) {
+		mensaje = fmt.Sprintf(
+			"Ya utilizaste tu %s de este mes. Hay disponibilidad desde el 1º del próximo mes.",
+			label,
+		)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "error",
-		"codigo":  "TURNO_MES_AGOTADO",
-		"mensaje": fmt.Sprintf("Ya utilizaste tu %s de este mes. Hay disponibilidad desde el 1º del próximo mes.", label),
+		"status":   "error",
+		"codigo":   codigo,
+		"mensaje":  mensaje,
+		"servicio": tipo,
 	})
 }
 
@@ -329,8 +405,8 @@ func MisTurnosCupo(authClient *auth.Client) http.HandlerFunc {
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"usado":      usados,
-			"mensual":    1,
-			"habilitado": usados < 1,
+			"mensual":    cupoMensualPorTipo[tipo],
+			"habilitado": usados < cupoMensualPorTipo[tipo],
 			"proximoMes": inicioProximo.Format("2006-01-02"),
 		})
 	}

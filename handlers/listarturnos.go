@@ -61,6 +61,14 @@ func ListarTurnos() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
+		// Los servicios con solicitud (grúa, sepelios, médico a domicilio) se
+		// gestionan en el panel de servicios (/panelservicios), no acá. Antes
+		// de que existiera ese panel se colaban en esta lista porque la query
+		// no filtraba por tipo, y el panel llegaba a ofrecerles "asignar
+		// médico" o "asignar clínica".
+		//
+		// COALESCE porque en las filas viejas la columna tipo puede ser NULL
+		// y ahí el turno es una consulta común.
 		query := `SELECT id::text, uid, socio_dni, solicitado_por,
 			es_para_adherente, beneficiario_dni, beneficiario_nombre,
 			COALESCE(tipo,'consulta'), especialidad, ciudad, direccion, motivo, estado, modo,
@@ -69,15 +77,18 @@ func ListarTurnos() http.HandlerFunc {
 			COALESCE(medico_id,''), COALESCE(medico_nombre,''), COALESCE(medico_apellido,''),
 			COALESCE(medico_direccion,''), COALESCE(fecha,''), COALESCE(hora,''),
 			COALESCE(clinica_id,''), COALESCE(clinica_nombre,''), COALESCE(clinica_direccion,'')
-			FROM turnos`
+			FROM turnos
+			WHERE COALESCE(tipo, 'consulta') <> ALL($1)`
 
-		if estado := r.URL.Query().Get("estado"); estado != "" {
-			query += ` WHERE estado = '` + strings.ReplaceAll(estado, "'", "''") + `' ORDER BY creado_en DESC`
-		} else {
-			query += ` ORDER BY creado_en DESC`
+		args := []interface{}{tiposDeServicio()}
+
+		if estado := strings.TrimSpace(r.URL.Query().Get("estado")); estado != "" {
+			query += ` AND estado = $2`
+			args = append(args, estado)
 		}
+		query += ` ORDER BY creado_en DESC`
 
-		rows, err := PGPool.Query(ctx, query)
+		rows, err := PGPool.Query(ctx, query, args...)
 		if err != nil {
 			log.Printf("ERROR LEYENDO TURNOS: %v", err)
 			http.Error(w, "error leyendo turnos: "+err.Error(), http.StatusInternalServerError)

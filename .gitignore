@@ -19,3 +19,6 @@ backend.log
 server.log
 *.log
 *.exe
+pg_test.bat
+migracion_pg.sql
+migracion_servicios.sql

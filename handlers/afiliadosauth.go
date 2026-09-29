@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"math/big"
 	"net/http"
@@ -24,6 +25,7 @@ var (
 
 var RESEND_API_KEY string
 var APP_LINK string
+var MAIL_FROM string
 
 func InicializarConfig() {
 	RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
@@ -33,6 +35,14 @@ func InicializarConfig() {
 	APP_LINK = os.Getenv("APP_LINK")
 	if APP_LINK == "" {
 		log.Println("ADVERTENCIA: APP_LINK no está seteada")
+	}
+
+	// Remitente de los mails. Configurable porque el dominio se está migrando
+	// de formulariosalud.com.ar a aurenservicios.com.ar: cuando Resend tenga
+	// verificado el nuevo dominio, se cambia acá y en .env, sin tocar código.
+	MAIL_FROM = os.Getenv("MAIL_FROM")
+	if MAIL_FROM == "" {
+		MAIL_FROM = "Auren <admin@formulariosalud.com.ar>"
 	}
 }
 
@@ -75,15 +85,124 @@ func enmascararMail(mail string) string {
 	return string(usuario[0]) + "****@" + partes[1]
 }
 
+// htmlMailCodigo arma el HTML del mail con el código de verificación.
+//
+// Mismo esqueleto que el de bienvenida (tablas con estilos inline, franja
+// dorada, logo, tipografía serif): los dos mails los lee la misma persona en
+// la misma sesión, y que se vean distintos se nota.
+//
+// El código no va en el preheader porque ese texto se ve en la vista previa de
+// la bandeja.
+//
+// Los % del CSS rompen fmt.Sprintf, así que el nombre y el código entran por
+// Replace y no por formato. El nombre va escapado: sale de la tabla socios y
+// entra directo en HTML.
+func htmlMailCodigo(nombre, codigo string) string {
+	saludo := "Hola"
+	if strings.TrimSpace(nombre) != "" {
+		saludo = "Hola " + strings.TrimSpace(nombre) + ","
+	}
+
+	cuerpo := `
+<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+	Usá este código para activar tu cuenta en Auren.
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f1ea;padding:32px 12px;">
+<tr>
+<td align="center">
+
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:20px;overflow:hidden;font-family:Lexend,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;box-shadow:0 4px 20px rgba(9,37,73,0.08);">
+
+	<!-- Franja dorada -->
+	<tr>
+	<td height="4" style="background-color:#c8a15a;font-size:0;line-height:0;">&nbsp;</td>
+	</tr>
+
+	<!-- Logotipo -->
+	<tr>
+	<td align="center" style="padding:36px 32px 8px 32px;">
+		<img src="__LOGO__" width="72" height="72" alt="Auren" style="display:block;width:72px;height:72px;border:0;outline:none;text-decoration:none;">
+	</td>
+	</tr>
+
+	<!-- Saludo -->
+	<tr>
+	<td align="center" style="padding:16px 32px 0 32px;">
+		<p style="margin:0 0 10px 0;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#a08148;font-weight:600;">
+			Mi Auren
+		</p>
+		<h1 style="margin:0;font-family:'Libre Baskerville',Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;color:#092549;font-weight:700;">
+			Tu código de verificación
+		</h1>
+	</td>
+	</tr>
+
+	<!-- Bajada -->
+	<tr>
+	<td align="center" style="padding:18px 40px 0 40px;">
+		<p style="margin:0;font-size:15px;line-height:1.7;color:#4a5568;font-weight:300;">
+			__SALUDO__
+		</p>
+	</td>
+	</tr>
+
+	<!-- Código -->
+	<tr>
+	<td align="center" style="padding:28px 32px 0 32px;">
+		<div style="display:inline-block;background-color:#f4f1ea;border:1px solid #c8a15a;border-radius:16px;padding:22px 36px;">
+			<span style="font-family:'Courier New',Courier,monospace;font-size:34px;line-height:1;letter-spacing:10px;font-weight:700;color:#092549;">__CODIGO__</span>
+		</div>
+	</td>
+	</tr>
+
+	<!-- Vencimiento -->
+	<tr>
+	<td align="center" style="padding:18px 40px 0 40px;">
+		<p style="margin:0;font-size:13px;line-height:1.7;color:#64748b;font-weight:300;">
+			Vence en 10 minutos. Ingressalo en la app para activar tu cuenta.
+		</p>
+	</td>
+	</tr>
+
+	<!-- Separador -->
+	<tr>
+	<td align="center" style="padding:32px 40px 0 40px;">
+		<div style="height:1px;background-color:rgba(200,161,90,0.30);font-size:0;line-height:0;">&nbsp;</div>
+	</td>
+	</tr>
+
+	<!-- Pie -->
+	<tr>
+	<td align="center" style="padding:22px 40px 34px 40px;">
+		<p style="margin:0 0 6px 0;font-size:12px;line-height:1.7;color:#64748b;font-weight:300;">
+			Auren Servicios
+		</p>
+		<p style="margin:0;font-size:11px;line-height:1.7;color:#a0aec0;font-weight:300;">
+			<a href="__LINK__" style="color:#a08148;text-decoration:underline;">__HOST__</a>
+		</p>
+	</td>
+	</tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+`
+
+	cuerpo = strings.ReplaceAll(cuerpo, "__SALUDO__", html.EscapeString(saludo))
+	cuerpo = strings.ReplaceAll(cuerpo, "__CODIGO__", html.EscapeString(codigo))
+	cuerpo = strings.ReplaceAll(cuerpo, "__LOGO__", logoDeLaApp())
+	cuerpo = strings.ReplaceAll(cuerpo, "__HOST__", hostDeLaApp())
+	return strings.ReplaceAll(cuerpo, "__LINK__", APP_LINK)
+}
+
 func enviarCodigoPorMail(destinatario, nombre, codigo string) error {
 	payload := map[string]interface{}{
-		"from":    "Auren <admin@formulariosalud.com.ar>",
+		"from":    MAIL_FROM,
 		"to":      []string{destinatario},
 		"subject": "Tu código de verificación Auren",
-		"html": fmt.Sprintf(
-			"<p>Hola %s,</p><p>Tu código para activar tu cuenta es:</p><h2>%s</h2><p>Vence en 10 minutos.</p>",
-			nombre, codigo,
-		),
+		"html":    htmlMailCodigo(nombre, codigo),
 	}
 	jsonData, _ := json.Marshal(payload)
 

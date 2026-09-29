@@ -446,6 +446,86 @@ func main() {
 		middleware.RequireAdmin(handlers.CambiarEstadoEstudio())(w, r)
 	})
 
+	// ------------------------------------------------------------------
+	// Servicios con solicitud: grúa, sepelios y médico a domicilio.
+	//
+	// Se guardan en la misma tabla "turnos" que los turnos y estudios, con
+	// tipo = 'grua' | 'sepelios' | 'domicilio'. Cada uno tiene su propio
+	// endpoint de alta porque cada uno exige un plan distinto:
+	//
+	//   grúa      -> "Auren en Ruta +"
+	//   sepelios  -> "Auren Salud" + "Auren Sepelio +"
+	//   domicilio -> "Auren Salud"
+	//
+	// "Seguro de vida" no aparece acá: por ahora es solo una tarjeta en la app,
+	// sin solicitud ni form.
+	// ------------------------------------------------------------------
+
+	mux.HandleFunc("/api/servicios/grua", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CrearSolicitudGrua(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/servicios/sepelios", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CrearSolicitudSepelios(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/servicios/domicilio", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CrearSolicitudMedicoDomicilio(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/servicios/cancelar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CancelarMiSolicitud(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/servicios/cupo", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.MisSolicitudesCupo(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/servicios", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(handlers.ListarSolicitudesServicio())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/servicios/estado", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireAdmin(
+			handlers.CambiarEstadoServicio(firebase.MessagingClient),
+		)(w, r)
+	})
+
 	mux.HandleFunc("/api/mis-turnos", func(w http.ResponseWriter, r *http.Request) {
 
 		setCORSHeaders(w, r)

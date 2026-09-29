@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -259,25 +260,136 @@ func EnviarBienvenidas() http.HandlerFunc {
 	}
 }
 
-// enviarMailBienvenida manda el correo de afiliación completa + link de la app.
-// No loguea el payload (ver AGENTS.md, tema 5).
+// logoDeLaApp arma la URL pública del isotipo a partir de APP_LINK, así el logo
+// sigue solo cuando se cambia el dominio de la app.
+func logoDeLaApp() string {
+	return strings.TrimSuffix(APP_LINK, "/") + "/auren-isotipo.png"
+}
+
+// hostDeLaApp devuelve el dominio de APP_LINK, que se muestra como texto en el
+// pie del mail. Se deriva del link y no está escrito a mano para que el texto
+// y el href no se contradigan cuando todavía se sirve desde Vercel.
+func hostDeLaApp() string {
+	u, err := url.Parse(APP_LINK)
+	if err != nil || u.Host == "" {
+		return "aurenservicios.com.ar"
+	}
+	return u.Host
+}
+
+// htmlMailBienvenida arma el HTML del mail de bienvenida.
+//
+// Es HTML de email, no una página: va en tablas con estilos inline, porque
+// Gmail, Outlook y WhatsApp borran los <style> y las clases. Por eso la fuente
+// se declara como stack (Libre Baskerville / Lexend no cargan en el mail, caen
+// a Georgia y a la del sistema, que es lo más cerca que se puede).
+//
+// Los % del CSS rompen fmt.Sprintf, así que el link y el logo entran por
+// Replace y no por formato.
+func htmlMailBienvenida() string {
+	html := `
+<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+	Bienvenido a Auren. Descargá la app para acceder con tu DNI.
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f1ea;padding:32px 12px;">
+<tr>
+<td align="center">
+
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:20px;overflow:hidden;font-family:Lexend,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;box-shadow:0 4px 20px rgba(9,37,73,0.08);">
+
+	<!-- Franja dorada -->
+	<tr>
+	<td height="4" style="background-color:#c8a15a;font-size:0;line-height:0;">&nbsp;</td>
+	</tr>
+
+	<!-- Logotipo -->
+	<tr>
+	<td align="center" style="padding:36px 32px 8px 32px;">
+		<img src="__LOGO__" width="72" height="72" alt="Auren" style="display:block;width:72px;height:72px;border:0;outline:none;text-decoration:none;">
+	</td>
+	</tr>
+
+	<!-- Bienvenida -->
+	<tr>
+	<td align="center" style="padding:16px 32px 0 32px;">
+		<p style="margin:0 0 10px 0;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#a08148;font-weight:600;">
+			Mi Auren
+		</p>
+		<h1 style="margin:0;font-family:'Libre Baskerville',Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;color:#092549;font-weight:700;">
+			Tu afiliación está completa
+		</h1>
+	</td>
+	</tr>
+
+	<!-- Bajada -->
+	<tr>
+	<td align="center" style="padding:18px 40px 0 40px;">
+		<p style="margin:0;font-size:15px;line-height:1.7;color:#4a5568;font-weight:300;">
+			Ya sos parte de Auren. Bajá la app para acceder a tus turnos, estudios y servicios con tu DNI.
+		</p>
+	</td>
+	</tr>
+
+	<!-- Botón -->
+	<tr>
+	<td align="center" style="padding:32px 32px 8px 32px;">
+		<a href="__LINK__" style="display:inline-block;background-color:#092549;color:#ffffff;font-family:Lexend,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;text-decoration:none;padding:16px 40px;border-radius:999px;">
+			Descargar la app
+		</a>
+	</td>
+	</tr>
+
+	<!-- Link plano por si el botón no se ve -->
+	<tr>
+	<td align="center" style="padding:16px 32px 0 32px;">
+		<p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8;">
+			Si el botón no funciona, copiá esta dirección:<br>
+			<a href="__LINK__" style="color:#a08148;text-decoration:underline;">__LINK__</a>
+		</p>
+	</td>
+	</tr>
+
+	<!-- Separador -->
+	<tr>
+	<td align="center" style="padding:36px 40px 0 40px;">
+		<div style="height:1px;background-color:rgba(200,161,90,0.30);font-size:0;line-height:0;">&nbsp;</div>
+	</td>
+	</tr>
+
+	<!-- Pie -->
+	<tr>
+	<td align="center" style="padding:22px 40px 34px 40px;">
+		<p style="margin:0 0 6px 0;font-size:12px;line-height:1.7;color:#64748b;font-weight:300;">
+			Auren Servicios
+		</p>
+		<p style="margin:0;font-size:11px;line-height:1.7;color:#a0aec0;font-weight:300;">
+			<a href="__LINK__" style="color:#a08148;text-decoration:underline;">__HOST__</a>
+		</p>
+	</td>
+	</tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+`
+
+	html = strings.ReplaceAll(html, "__LOGO__", logoDeLaApp())
+	html = strings.ReplaceAll(html, "__HOST__", hostDeLaApp())
+	return strings.ReplaceAll(html, "__LINK__", APP_LINK)
+}
+
 func enviarMailBienvenida(to string) error {
 	if APP_LINK == "" {
 		return fmt.Errorf("APP_LINK no configurada en .env")
 	}
 
-	html := fmt.Sprintf(`
-		<p>Hola,</p>
-		<p>Tu afiliación a Auren está completa.</p>
-		<p>Descargá la app y accedé con tu DNI:</p>
-		<p><a href="%s">Descargá la app</a></p>
-	`, APP_LINK)
-
 	payload := map[string]interface{}{
-		"from":    "Auren <admin@formulariosalud.com.ar>",
+		"from":    MAIL_FROM,
 		"to":      []string{to},
 		"subject": "Tu afiliación a Auren está completa",
-		"html":    html,
+		"html":    htmlMailBienvenida(),
 	}
 
 	body, err := json.Marshal(payload)

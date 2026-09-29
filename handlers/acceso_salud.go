@@ -59,11 +59,11 @@ func evaluarAccesoAurenSalud(data map[string]interface{}) *AccesoAurenSalud {
 // responderSinAccesoSalud responde 403 con código y mensaje claros para la app.
 func responderSinAccesoSalud(w http.ResponseWriter, acceso *AccesoAurenSalud) {
 	codigo := "PLAN_SALUD_INACTIVO"
-	mensaje := "Su plan auren salud se encuentra inactivo"
+	mensaje := "Tu plan Auren Salud está inactivo"
 
 	if !acceso.SocioActivo {
 		codigo = "SOCIO_INACTIVO"
-		mensaje = "Usted no se encuentra activo para usar los servicios de auren salud"
+		mensaje = "No estás activo para usar los servicios de Auren Salud"
 	}
 
 	w.Header().Set("Content-Type", "application/json")
