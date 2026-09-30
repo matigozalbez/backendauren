@@ -26,6 +26,8 @@ var (
 var RESEND_API_KEY string
 var APP_LINK string
 var MAIL_FROM string
+var APP_LINK_ADMIN string
+var MAIL_FROM_ADMIN string
 
 func InicializarConfig() {
 	RESEND_API_KEY = os.Getenv("RESEND_API_KEY")
@@ -37,12 +39,29 @@ func InicializarConfig() {
 		log.Println("ADVERTENCIA: APP_LINK no está seteada")
 	}
 
+	// Panel admin. Es un deploy aparte del de la app (otro dominio de Vercel),
+	// así que el mail de invitación y el pie de esos mails se arman desde acá
+	// y no desde APP_LINK. Sin APP_LINK_ADMIN el pie y el botón del mail caen
+	// al de la app: preferible un link que no va al panel a un mail sin destino.
+	APP_LINK_ADMIN = os.Getenv("APP_LINK_ADMIN")
+	if APP_LINK_ADMIN == "" {
+		APP_LINK_ADMIN = APP_LINK
+	}
+
 	// Remitente de los mails. Configurable porque el dominio se está migrando
 	// de formulariosalud.com.ar a aurenservicios.com.ar: cuando Resend tenga
 	// verificado el nuevo dominio, se cambia acá y en .env, sin tocar código.
 	MAIL_FROM = os.Getenv("MAIL_FROM")
 	if MAIL_FROM == "" {
 		MAIL_FROM = "Auren <admin@formulariosalud.com.ar>"
+	}
+
+	// Remitente de los mails al equipo. Tiene su propio valor porque el de los
+	// socios y el del staff no tienen por qué ser el mismo. Va después de
+	// MAIL_FROM para poder heredarlo si esta no está seteada.
+	MAIL_FROM_ADMIN = os.Getenv("MAIL_FROM_ADMIN")
+	if MAIL_FROM_ADMIN == "" {
+		MAIL_FROM_ADMIN = MAIL_FROM
 	}
 }
 

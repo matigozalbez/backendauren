@@ -1,17 +1,13 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
-	"time"
-	"io"
 
 	"firebase.google.com/go/v4/auth"
 )
@@ -85,7 +81,7 @@ func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 
 		rol := input.Rol
 		if rol == "" {
-			rol = "admin"
+			rol = rolAdmin
 		}
 
 		if _, err := PGPool.Exec(ctx, `
@@ -103,13 +99,17 @@ func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
-		// Link para que el nuevo admin elija su propia contraseña en vez de usar la temporal.
+		// Link para que el nuevo admin elija su propia contraseña en vez de usar
+		// la temporal. Acá el botón sí es el de reset, a diferencia de
+		// OtorgarAdmin, que manda al panel: este usuario todavía no tiene
+		// contraseña elegida.
 		resetLink, err := authClient.PasswordResetLink(ctx, input.Email)
 		if err != nil {
 			// No frenamos el flujo por esto — el usuario ya quedó creado y funcional.
-			fmt.Printf("⚠️ no se pudo generar el link de reset para %s: %v\n", input.Email, err)
-		} else if err := enviarEmailBienvenidaAdmin(input.Email, input.Nombre, resetLink); err != nil {
-			fmt.Printf("⚠️ no se pudo enviar el mail de bienvenida a %s: %v\n", input.Email, err)
+			log.Printf("no se pudo generar el link de reset para %s: %v", input.Email, err)
+		} else if err := enviarMailInvitacionAdmin(input.Email, input.Nombre, rol, "Elegir mi contraseña", resetLink); err != nil {
+			// Tampoco frenamos: la cuenta ya existe y el claim ya está puesto.
+			log.Printf("no se pudo enviar el mail de invitación a %s: %v", input.Email, err)
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -127,69 +127,4 @@ func generarPasswordTemporal() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// Reemplazá esto por tu helper de Resend ya existente si lo tenés (el que usa CrearPassword/SolicitarCodigo).
-func enviarEmailBienvenidaAdmin(to, nombre, resetLink string) error {
-	fmt.Printf("\n=== [RESEND LOG] Iniciando envío de mail ===\n")
-	fmt.Printf("-> Destinatario (to): %s\n", to)
-	fmt.Printf("-> Nombre: %s\n", nombre)
-	fmt.Printf("-> ResetLink: %s\n", resetLink)
-	fmt.Printf("-> Longitud RESEND_API_KEY: %d caracteres\n", len(RESEND_API_KEY))
-
-	html := fmt.Sprintf(`
-		<p>Hola %s,</p>
-		<p>Se creó una cuenta de administrador para vos en el Panel Admin de Auren.</p>
-		<p><a href="%s">Hacé clic acá para elegir tu contraseña</a> y después ingresá con tu email.</p>
-	`, nombre, resetLink)
-
-payload := map[string]interface{}{
-    "from":    "Auren <admin@formulariosalud.com.ar>",
-    "to":      []string{to},
-    "subject": "Te dieron acceso al Panel Admin de Auren",
-    "html":    html,
-}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Printf("❌ [RESEND LOG] Error haciendo Marshal del JSON: %v\n", err)
-		return err
-	}
-	fmt.Printf("-> Body JSON preparado: %s\n", string(body))
-
-	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewBuffer(body))
-	if err != nil {
-		fmt.Printf("❌ [RESEND LOG] Error creando http.NewRequest: %v\n", err)
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+RESEND_API_KEY)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	fmt.Printf("-> Enviando HTTP POST a Resend...\n")
-	
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("❌ [RESEND LOG] Error en la petición de red (client.Do): %v\n", err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Leemos la respuesta completa del cuerpo devuelto por Resend
-	respBodyBytes, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		fmt.Printf("⚠️ [RESEND LOG] No se pudo leer el body de la respuesta: %v\n", readErr)
-	}
-	respBodyStr := string(respBodyBytes)
-
-	fmt.Printf("-> HTTP Status Code: %d\n", resp.StatusCode)
-	fmt.Printf("-> Resend Response Body: %s\n", respBodyStr)
-
-	if resp.StatusCode >= 300 {
-		fmt.Printf("❌ [RESEND LOG] Falló el envío. Status >= 300\n")
-		return fmt.Errorf("resend devolvió status %d: %s", resp.StatusCode, respBodyStr)
-	}
-
-	fmt.Printf("✅ [RESEND LOG] Mail enviado con éxito!\n===========================================\n\n")
-	return nil
 }

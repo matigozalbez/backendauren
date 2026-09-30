@@ -263,14 +263,29 @@ func EnviarBienvenidas() http.HandlerFunc {
 // logoDeLaApp arma la URL pública del isotipo a partir de APP_LINK, así el logo
 // sigue solo cuando se cambia el dominio de la app.
 func logoDeLaApp() string {
-	return strings.TrimSuffix(APP_LINK, "/") + "/auren-isotipo.png"
+	return isotipoDe(APP_LINK)
+}
+
+// isotipoDe arma la URL del isotipo a partir de un link base. El panel admin
+// sirve su propia copia en paneladminauren/public, así que el isotipo sale del
+// dominio del panel y no del de la app: si el deploy de la app llegara a caerse,
+// el mail de invitación al panel sigue teniendo logo.
+func isotipoDe(link string) string {
+	return strings.TrimSuffix(link, "/") + "/auren-isotipo.png"
 }
 
 // hostDeLaApp devuelve el dominio de APP_LINK, que se muestra como texto en el
 // pie del mail. Se deriva del link y no está escrito a mano para que el texto
 // y el href no se contradigan cuando todavía se sirve desde Vercel.
 func hostDeLaApp() string {
-	u, err := url.Parse(APP_LINK)
+	return hostDe(APP_LINK)
+}
+
+// hostDe devuelve el dominio de cualquier link, para el pie de los mail. El
+// fallback es el dominio de producción: si la env viene vacía o mal formada el
+// mail sale igual, con el texto del pie que corresponde al Auren de verdad.
+func hostDe(link string) string {
+	u, err := url.Parse(link)
 	if err != nil || u.Host == "" {
 		return "aurenservicios.com.ar"
 	}
