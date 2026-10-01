@@ -79,11 +79,14 @@ func CancelarTurnoAdmin() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		var estadoActual string
+		var estadoActual, beneficiarioNombre, socioEmail, especialidad string
+		var esParaAdherente bool
 		err := PGPool.QueryRow(ctx,
-			`SELECT estado FROM turnos WHERE id::text = $1`,
+			`SELECT estado, COALESCE(beneficiario_nombre,''), COALESCE(socio_email,''),
+			        COALESCE(especialidad,''), COALESCE(es_para_adherente,FALSE)
+			 FROM turnos WHERE id::text = $1`,
 			input.TurnoID,
-		).Scan(&estadoActual)
+		).Scan(&estadoActual, &beneficiarioNombre, &socioEmail, &especialidad, &esParaAdherente)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
@@ -110,6 +113,11 @@ func CancelarTurnoAdmin() http.HandlerFunc {
 		}
 
 		log.Printf("TURNO CANCELADO por el admin id=%s motivo=%q", input.TurnoID, input.Motivo)
+
+		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, especialidad, esParaAdherente)
+		detalle["motivo"] = input.Motivo
+
+		registrarAuditoria(r, AccionTurnoCancelar, "turno", input.TurnoID, detalle)
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

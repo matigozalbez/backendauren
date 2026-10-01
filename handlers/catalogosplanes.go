@@ -63,6 +63,10 @@ func CrearOActualizarCatalogoPlan() http.HandlerFunc {
 			return
 		}
 
+		registrarAuditoria(r, AccionPlanUpsert, "plan", input.Nombre, map[string]any{
+			"n_beneficios": len(beneficiosData),
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

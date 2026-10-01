@@ -112,6 +112,11 @@ func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 			log.Printf("no se pudo enviar el mail de invitación a %s: %v", input.Email, err)
 		}
 
+		registrarAuditoria(r, AccionPermisoCrearAdmin, "permiso", userRecord.UID, map[string]any{
+			"email_destino": input.Email,
+			"rol":           rol,
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",

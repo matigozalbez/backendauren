@@ -28,6 +28,16 @@ func RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next(w, r)
+		// El operador queda en el context para que los handlers puedan auditar
+		// la accion. El rol es fijo porque todavia no existe el claim `role`.
+		// auth.Token no expone el email: viene en los claims del ID token.
+		email, _ := token.Claims["email"].(string)
+		operador := &Operador{
+			UID:   token.UID,
+			Email: email,
+			Rol:   RolAdminDefault,
+		}
+
+		next(w, r.WithContext(ConOperador(r.Context(), operador)))
 	}
 }

@@ -99,6 +99,10 @@ func CrearMedico() http.HandlerFunc {
 			return
 		}
 
+		registrarAuditoria(r, AccionMedicoCrear, "medico", input.DNI, map[string]any{
+			"especialidad": input.Especialidad,
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -390,6 +394,8 @@ func BorrarMedico() http.HandlerFunc {
 			http.Error(w, "médico no encontrado", http.StatusNotFound)
 			return
 		}
+
+		registrarAuditoria(r, AccionMedicoBorrar, "medico", input.DNI, map[string]any{})
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

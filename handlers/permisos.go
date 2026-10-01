@@ -88,6 +88,11 @@ func OtorgarAdmin(authClient *auth.Client) http.HandlerFunc {
 			log.Printf("OTORGADO sin mail a %s: %v", input.Email, err)
 		}
 
+		registrarAuditoria(r, AccionPermisoOtorgar, "permiso", user.UID, map[string]any{
+			"email_destino": input.Email,
+			"rol":           rolAdmin,
+		})
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
@@ -134,6 +139,10 @@ func RevocarAdmin(authClient *auth.Client) http.HandlerFunc {
 			http.Error(w, "error revocando admin", http.StatusInternalServerError)
 			return
 		}
+
+		registrarAuditoria(r, AccionPermisoRevocar, "permiso", user.UID, map[string]any{
+			"email_destino": input.Email,
+		})
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

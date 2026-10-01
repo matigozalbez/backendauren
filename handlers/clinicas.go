@@ -116,6 +116,12 @@ func CrearClinica() http.HandlerFunc {
 			return
 		}
 
+		registrarAuditoria(r, AccionClinicaCrear, "clinica", "", map[string]any{
+			"nombre":         input.Nombre,
+			"ciudad":         input.Ciudad,
+			"n_especialidades": len(especialidades),
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -289,6 +295,10 @@ func EditarClinica() http.HandlerFunc {
 			return
 		}
 
+		registrarAuditoria(r, AccionClinicaEditar, "clinica", fmt.Sprintf("%d", input.ID), map[string]any{
+			"nombre": input.Nombre,
+		})
+
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
 }
@@ -320,6 +330,8 @@ func BorrarClinica() http.HandlerFunc {
 			http.Error(w, "clínica no encontrada", http.StatusNotFound)
 			return
 		}
+
+		registrarAuditoria(r, AccionClinicaBorrar, "clinica", fmt.Sprintf("%d", input.ID), map[string]any{})
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -365,14 +377,16 @@ func AsignarClinica(
 
 		var uid, socioEmail, beneficiarioNombre, especialidad, ciudad, estadoActual, tipoTurno string
 		var fechaActual, horaActual string
+		var esParaAdherente bool
 		err := PGPool.QueryRow(turnoCtx, `
 			SELECT uid, COALESCE(socio_email,''), COALESCE(beneficiario_nombre,''),
 				   COALESCE(especialidad,''), COALESCE(ciudad,''), estado,
-				   COALESCE(fecha,''), COALESCE(hora,''), COALESCE(tipo,'consulta')
+				   COALESCE(fecha,''), COALESCE(hora,''), COALESCE(tipo,'consulta'),
+				   COALESCE(es_para_adherente,FALSE)
 			FROM turnos WHERE id::text = $1`,
 			input.TurnoID,
 		).Scan(&uid, &socioEmail, &beneficiarioNombre, &especialidad, &ciudad,
-			&estadoActual, &fechaActual, &horaActual, &tipoTurno)
+			&estadoActual, &fechaActual, &horaActual, &tipoTurno, &esParaAdherente)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
@@ -560,6 +574,14 @@ func AsignarClinica(
 				log.Printf("ERROR enviando email de turno a %s: %v", socioEmail, err)
 			}
 		}
+
+		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, especialidad, esParaAdherente)
+		detalle["clinica_id"] = input.ClinicaID
+		detalle["clinica_nombre"] = clinicaNombre
+		detalle["fecha"] = fechaFinal
+		detalle["hora"] = horaFinal
+
+		registrarAuditoria(r, AccionTurnoAsignarClinica, "turno", input.TurnoID, detalle)
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

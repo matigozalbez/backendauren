@@ -604,6 +604,17 @@ func main() {
 		middleware.RequireAdmin(handlers.ListarHistorial())(w, r)
 	})
 
+	mux.HandleFunc("/api/admin/auditoria", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		middleware.RequireAdmin(handlers.ListarAuditoria())(w, r)
+	})
+
 	mux.HandleFunc("/api/admin/servidor/metricas", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 

@@ -154,6 +154,10 @@ func BackfillSociosConocidos() http.HandlerFunc {
 			}
 		}
 
+		registrarAuditoria(r, AccionSocioBackfill, "socio", "", map[string]any{
+			"registrados": registrados,
+		})
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":      "ok",
@@ -250,6 +254,11 @@ func EnviarBienvenidas() http.HandlerFunc {
 			}
 			enviados++
 		}
+
+		registrarAuditoria(r, AccionNotifBienvenidas, "notificacion", "", map[string]any{
+			"enviados": enviados,
+			"fallidos": fallidos,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

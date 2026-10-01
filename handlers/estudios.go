@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/jackc/pgx/v5"
 )
 
 const maxImagenEstudioBytes = 5 * 1024 * 1024 // 5 MB
@@ -175,19 +177,29 @@ func CambiarEstadoEstudio() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		tag, err := PGPool.Exec(ctx,
-			`UPDATE turnos SET estado = $1 WHERE id::text = $2 AND tipo = 'estudio'`,
+		var beneficiarioNombre, socioEmail, especialidad string
+		var esParaAdherente bool
+		err := PGPool.QueryRow(ctx,
+			`UPDATE turnos SET estado = $1
+			 WHERE id::text = $2 AND tipo = 'estudio'
+			 RETURNING COALESCE(beneficiario_nombre,''), COALESCE(socio_email,''),
+			           COALESCE(especialidad,''), COALESCE(es_para_adherente,FALSE)`,
 			input.Estado, input.TurnoID,
-		)
+		).Scan(&beneficiarioNombre, &socioEmail, &especialidad, &esParaAdherente)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				http.Error(w, "estudio no encontrado", http.StatusNotFound)
+				return
+			}
 			log.Printf("ERROR actualizando estado del estudio %s: %v", input.TurnoID, err)
 			http.Error(w, "error actualizando el estado", http.StatusInternalServerError)
 			return
 		}
-		if tag.RowsAffected() == 0 {
-			http.Error(w, "estudio no encontrado", http.StatusNotFound)
-			return
-		}
+
+		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, especialidad, esParaAdherente)
+		detalle["estado"] = input.Estado
+
+		registrarAuditoria(r, AccionEstudioEstado, "estudio", input.TurnoID, detalle)
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

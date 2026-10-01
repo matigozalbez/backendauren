@@ -53,6 +53,11 @@ func ActualizarBeneficiosSocio() http.HandlerFunc {
 			return
 		}
 
+		registrarAuditoria(r, AccionSocioBeneficios, "socio", dni, map[string]any{
+			"plan":         input.Plan,
+			"n_beneficios": len(input.Beneficios),
+		})
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

@@ -160,14 +160,16 @@ func AsignarMedico(
 
 		var uid, socioEmail, beneficiarioNombre, especialidad, ciudad, estadoActual string
 		var fechaActual, horaActual string
+		var esParaAdherente bool
 		err := PGPool.QueryRow(turnoCtx, `
 			SELECT uid, COALESCE(socio_email,''), COALESCE(beneficiario_nombre,''),
 				   COALESCE(especialidad,''), COALESCE(ciudad,''), estado,
-				   COALESCE(fecha,''), COALESCE(hora,'')
+				   COALESCE(fecha,''), COALESCE(hora,''),
+				   COALESCE(es_para_adherente,FALSE)
 			FROM turnos WHERE id::text = $1`,
 			input.TurnoID,
 		).Scan(&uid, &socioEmail, &beneficiarioNombre, &especialidad, &ciudad,
-			&estadoActual, &fechaActual, &horaActual)
+			&estadoActual, &fechaActual, &horaActual, &esParaAdherente)
 		if err != nil {
 			http.Error(w, "turno no encontrado", http.StatusNotFound)
 			return
@@ -409,6 +411,14 @@ func AsignarMedico(
 		// =========================================================
 		// 6. RESPUESTA
 		// =========================================================
+
+		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, especialidad, esParaAdherente)
+		detalle["medico_id"] = input.MedicoID
+		detalle["medico_nombre"] = strings.TrimSpace(medicoNombre + " " + medicoApellido)
+		detalle["fecha"] = fechaFinal
+		detalle["hora"] = horaFinal
+
+		registrarAuditoria(r, AccionTurnoAsignarMedico, "turno", input.TurnoID, detalle)
 
 		w.WriteHeader(http.StatusOK)
 

@@ -141,6 +141,15 @@ func CrearNotificacion(msgClient *messaging.Client) http.HandlerFunc {
 			log.Printf("push [%s] enviados con éxito: %d de %d", req.Tipo, pushEnviados, len(tokens))
 		}
 
+		// Sin titulo ni mensaje en la auditoría: es contenido editable por el
+		// admin y la tabla es permanente y consultable desde el panel.
+		registrarAuditoria(r, AccionNotifCrear, "notificacion", "", map[string]any{
+			"tipo":          req.Tipo,
+			"plan":          req.Plan,
+			"user_id":       req.UserID,
+			"push_enviados": pushEnviados,
+		})
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{

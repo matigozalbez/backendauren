@@ -255,6 +255,10 @@ func CrearSocio() http.HandlerFunc {
 			guardarStats(stats)
 		}
 
+		registrarAuditoria(r, AccionSocioCrear, "socio", input.DNI, map[string]any{
+			"estado": input.Estado,
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -536,6 +540,11 @@ func ActualizarEstadoSocio() http.HandlerFunc {
 			}
 		}
 
+		registrarAuditoria(r, AccionSocioActualizar, "socio", input.ID, map[string]any{
+			"estado_anterior": estadoAnterior,
+			"estado_nuevo":    input.Estado,
+		})
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -620,6 +629,11 @@ func ActualizarEstadoPlan() http.HandlerFunc {
 			http.Error(w, "error actualizando plan: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		registrarAuditoria(r, AccionSocioPlanEstado, "socio", socioID, map[string]any{
+			"plan":   input.Plan,
+			"estado": input.Estado,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -802,6 +816,12 @@ func ImportarSociosCSV() http.HandlerFunc {
 		// no diferencia altas nuevas de actualizaciones de socios que ya existían
 		// con otro estado. Para stats 100% exactos habría que leer el estado previo
 		// de cada uno (lo cual reintroduce lecturas). A definir si les alcanza así.
+
+		registrarAuditoria(r, AccionSocioImportarCSV, "socio", "", map[string]any{
+			"procesados": procesados,
+			"omitidos":   omitidos,
+			"nuevos":     nuevos,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

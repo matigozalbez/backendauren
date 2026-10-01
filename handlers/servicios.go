@@ -599,11 +599,16 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 		// Leemos la solicitud actual: necesitamos el uid para el push y para
 		// no dejar cambiar de estado algo ya cancelado.
 		var uid, estadoActual, concepto, fechaActual, horaActual string
+		var beneficiarioNombre, socioEmail string
+		var esParaAdherente bool
 		err := PGPool.QueryRow(ctx, `
-			SELECT uid, estado, COALESCE(especialidad,''), COALESCE(fecha,''), COALESCE(hora,'')
+			SELECT uid, estado, COALESCE(especialidad,''), COALESCE(fecha,''), COALESCE(hora,''),
+			       COALESCE(beneficiario_nombre,''), COALESCE(socio_email,''),
+			       COALESCE(es_para_adherente,FALSE)
 			FROM turnos WHERE id::text = $1 AND tipo = $2`,
 			input.TurnoID, def.Tipo,
-		).Scan(&uid, &estadoActual, &concepto, &fechaActual, &horaActual)
+		).Scan(&uid, &estadoActual, &concepto, &fechaActual, &horaActual,
+			&beneficiarioNombre, &socioEmail, &esParaAdherente)
 
 		if err != nil {
 			http.Error(w, "solicitud no encontrada", http.StatusNotFound)
@@ -699,6 +704,15 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 		if debeNotificarServicio(estadoActual, estadoFinal) {
 			enviarPushEstadoServicio(ctx, msgClient, uid, def, concepto, estadoFinal, fechaFinal, horaFinal, input.Motivo)
 		}
+
+		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, "", esParaAdherente)
+		detalle["tipo"] = def.Tipo
+		detalle["estado_anterior"] = estadoActual
+		detalle["estado_nuevo"] = estadoFinal
+		detalle["fecha"] = fechaFinal
+		detalle["hora"] = horaFinal
+
+		registrarAuditoria(r, AccionServicioEstado, "servicio", input.TurnoID, detalle)
 
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
