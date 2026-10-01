@@ -37,7 +37,7 @@ func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 		input.Nombre = strings.TrimSpace(input.Nombre)
 		input.Apellido = strings.TrimSpace(input.Apellido)
 		input.Email = strings.TrimSpace(strings.ToLower(input.Email))
-		input.Rol = strings.TrimSpace(input.Rol)
+		rol := normalizarRol(input.Rol)
 
 		if input.Nombre == "" || input.Apellido == "" || input.Email == "" {
 			http.Error(w, "faltan datos (nombre, apellido o email)", http.StatusBadRequest)
@@ -72,16 +72,15 @@ func CrearAdmin(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
+		// admin va en true solo para el admin: un operador entra al panel con
+		// admin false y role operador, y RequireOperador lo deja pasar igual.
+		// SetCustomUserClaims reemplaza el mapa entero, por eso van los dos.
 		if err := authClient.SetCustomUserClaims(ctx, userRecord.UID, map[string]interface{}{
-			"admin": true,
+			"admin": rol == rolAdmin,
+			"role":  rol,
 		}); err != nil {
-			http.Error(w, "usuario creado, pero falló al asignarle el permiso de admin", http.StatusInternalServerError)
+			http.Error(w, "usuario creado, pero falló al asignarle el permiso", http.StatusInternalServerError)
 			return
-		}
-
-		rol := input.Rol
-		if rol == "" {
-			rol = rolAdmin
 		}
 
 		if _, err := PGPool.Exec(ctx, `

@@ -3,6 +3,7 @@ package firebase
 import (
 	"context"
 	"fmt"
+	"log"
 )
 
 func DarAdmin(email string) error {
@@ -13,14 +14,14 @@ func DarAdmin(email string) error {
 		return fmt.Errorf("no se encontró el usuario: %w", err)
 	}
 
-	err = AuthClient.SetCustomUserClaims(ctx, user.UID, map[string]interface{}{
+	if err := AuthClient.SetCustomUserClaims(ctx, user.UID, map[string]interface{}{
 		"admin": true,
-	})
-	if err != nil {
+		"role":  "admin",
+	}); err != nil {
 		return fmt.Errorf("error asignando admin: %w", err)
 	}
 
-	fmt.Printf("✅ Admin asignado a %s | UID: %s\n", email, user.UID)
+	log.Printf("✅ Admin asignado a %s | UID: %s\n", email, user.UID)
 
 	return nil
 }

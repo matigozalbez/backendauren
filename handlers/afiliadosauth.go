@@ -91,19 +91,6 @@ func generarCodigo() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-// oculta el correo con conversion "matias@gmail.com" en "m****@gmail.com"
-func enmascararMail(mail string) string {
-	partes := strings.Split(mail, "@")
-	if len(partes) != 2 || len(partes[0]) == 0 {
-		return "***@***"
-	}
-	usuario := partes[0]
-	if len(usuario) <= 1 {
-		return usuario + "***@" + partes[1]
-	}
-	return string(usuario[0]) + "****@" + partes[1]
-}
-
 // htmlMailCodigo arma el HTML del mail con el código de verificación.
 //
 // Mismo esqueleto que el de bienvenida (tablas con estilos inline, franja
@@ -288,12 +275,14 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 
 	if req.Flujo == "primer_ingreso" && afiliadoUID != "" {
 		log.Printf("[solicitar-codigo] rechazo: primer_ingreso pero ya tiene UID")
-		http.Error(w, "DNI inválido", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respuestaGenerica)
 		return
 	}
 	if req.Flujo == "recuperar_password" && afiliadoUID == "" {
 		log.Printf("[solicitar-codigo] rechazo: recuperar_password pero no tiene UID")
-		http.Error(w, "DNI inválido", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respuestaGenerica)
 		return
 	}
 
@@ -342,7 +331,6 @@ func SolicitarCodigo(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[solicitar-codigo] mail enviado ok a %q", socio.Email)
 
-	respuestaGenerica["mailEnmascarado"] = enmascararMail(socio.Email)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(respuestaGenerica)
 }

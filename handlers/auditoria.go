@@ -66,22 +66,30 @@ var accionesAuditadas = map[string]struct{}{
 }
 
 // EventoAuditoria es un registro ya persistido, en la forma en que la
-// consume el panel y, más adelante, el websocket.
+// consume el panel y el websocket.
+//
+// Los tags json tienen que coincidir con las claves que arma ListarAuditoria
+// (snake_case): el panel lee la fila del websocket con el mismo tipo que la que
+// llega por HTTP. Sin los tags, Go serializa los nombres de campo tal cual
+// (OperadorEmail) y el panel no encuentra operador_email, accion ni fecha.
 type EventoAuditoria struct {
-	ID            int64
-	Accion        string
-	Entidad       string
-	EntidadID     string
-	OperadorEmail string
-	OperadorRol   string
-	Detalle       map[string]any
-	Fecha         time.Time
+	ID            int64          `json:"id"`
+	OperadorUID   string         `json:"operador_uid"`
+	Accion        string         `json:"accion"`
+	Entidad       string         `json:"entidad"`
+	EntidadID     string         `json:"entidad_id"`
+	OperadorEmail string         `json:"operador_email"`
+	OperadorRol   string         `json:"operador_rol"`
+	Detalle       map[string]any `json:"detalle"`
+	IP            string         `json:"ip"`
+	UserAgent     string         `json:"user_agent"`
+	Fecha         time.Time      `json:"fecha"`
 }
 
-// notificarEnVivo es el gancho de la fase C (websocket). Hoy no hace nada:
-// la auditoría se escribe en Postgres y nada más. Cuando se agregue
-// /api/ws/admin se reemplaza por el broadcast al hub, sin tocar los call
-// sites de registrarAuditoria.
+// notificarEnVivo corre después de que el evento quedó guardado en Postgres,
+// y difunde al hub del websocket para que el panel lo muestre sin recargar.
+// Queda como var para que main lo enganche con ConectarNotificador: los call
+// sites de registrarAuditoria no cambian.
 var notificarEnVivo = func(ev EventoAuditoria) {}
 
 // detalleBeneficiario es la parte del detalle que identifica a la persona a la
@@ -161,14 +169,19 @@ func registrarAuditoria(r *http.Request, accion, entidad, entidadID string, deta
 			return
 		}
 
+		// Los mismos campos que devuelve ListarAuditoria, para que el panel
+		// pueda pintar la fila nueva sin ir a buscarla por HTTP.
 		notificarEnVivo(EventoAuditoria{
 			ID:            id,
+			OperadorUID:   uid,
 			Accion:        accion,
 			Entidad:       entidad,
 			EntidadID:     entidadID,
 			OperadorEmail: email,
 			OperadorRol:   rol,
 			Detalle:       detalle,
+			IP:            ip,
+			UserAgent:     userAgent,
 			Fecha:         time.Now(),
 		})
 	}()
@@ -258,33 +271,28 @@ func ListarAuditoria() http.HandlerFunc {
 		items := []map[string]any{}
 		for rows.Next() {
 			var (
-				ev        EventoAuditoria
-				detalle   []byte
-				uid       string
-				ip        string
-				userAgent string
-				fecha     time.Time
+				ev      EventoAuditoria
+				detalle []byte
 			)
-			if err := rows.Scan(&ev.ID, &uid, &ev.OperadorEmail, &ev.OperadorRol,
+			if err := rows.Scan(&ev.ID, &ev.OperadorUID, &ev.OperadorEmail, &ev.OperadorRol,
 				&ev.Accion, &ev.Entidad, &ev.EntidadID, &detalle,
-				&ip, &userAgent, &fecha); err != nil {
+				&ev.IP, &ev.UserAgent, &ev.Fecha); err != nil {
 				continue
 			}
 			ev.Detalle = map[string]any{}
 			_ = json.Unmarshal(detalle, &ev.Detalle)
-			ev.Fecha = fecha
 
 			items = append(items, map[string]any{
 				"id":             ev.ID,
-				"operador_uid":   uid,
+				"operador_uid":   ev.OperadorUID,
 				"operador_email": ev.OperadorEmail,
 				"operador_rol":   ev.OperadorRol,
 				"accion":         ev.Accion,
 				"entidad":        ev.Entidad,
 				"entidad_id":     ev.EntidadID,
 				"detalle":        ev.Detalle,
-				"ip":             ip,
-				"user_agent":     userAgent,
+				"ip":             ev.IP,
+				"user_agent":     ev.UserAgent,
 				"fecha":          ev.Fecha,
 			})
 		}

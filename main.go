@@ -3,7 +3,6 @@ package main
 import (
 	"aurenbackend/firebase"
 	"aurenbackend/handlers"
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -29,6 +28,10 @@ func main() {
 	InitPG()
 	defer ClosePG()
 
+	// Engancha el hub del websocket a registrarAuditoria, así cada evento
+	// guardado llega a los paneles abiertos.
+	handlers.ConectarNotificador()
+
 	mux := http.NewServeMux()
 	handlers.AuthClient = firebase.AuthClient
 	handlers.PGPool = PG
@@ -42,21 +45,15 @@ func main() {
 			log.Fatal(err)
 		}
 	*/
-	err := firebase.DarAdmin("matiasgozalbez@gmail.com")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	user, err := firebase.AuthClient.GetUserByEmail(
-		context.Background(),
-		"matiasgozalbez@gmail.com",
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("UID: %s", user.UID)
-	log.Printf("CLAIMS: %+v", user.CustomClaims)
+	// DarAdmin queda acá, comentado, como forma de recuperar el acceso si te
+	// quedás sin admin. Para usarlo: descomentar, `go build`, correr, y volver
+	// a comentar. Importante: el claim viaja en el ID token, así que después de
+	// correrlo hay que cerrar sesión y volver a entrar al panel.
+	//
+	// firebase.DarAdmin("matiasgozalbez@gmail.com")
+	// if err != nil {
+	// 	log.Println(err)
+	// }
 
 	mux.HandleFunc("/api/admin/socios", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
@@ -64,7 +61,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearSocio())(w, r)
+		middleware.RequireOperador(handlers.CrearSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/vincular-socio", func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +145,7 @@ func main() {
 			return
 		}
 		// Acá ya le pasas el firebase.Client y firebase.MessagingClient de tu init global
-		middleware.RequireAdmin(handlers.CrearNotificacion(firebase.MessagingClient))(w, r)
+		middleware.RequireOperador(handlers.CrearNotificacion(firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-socios", func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +154,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarSocios())(w, r)
+		middleware.RequireOperador(handlers.ListarSocios())(w, r)
 	})
 
 	mux.HandleFunc("/api/notificaciones", func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +181,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearOActualizarCatalogoPlan())(w, r)
+		middleware.RequireOperador(handlers.CrearOActualizarCatalogoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/obtener-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +190,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ObtenerCatalogoPlan())(w, r)
+		middleware.RequireOperador(handlers.ObtenerCatalogoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/socios/beneficios", func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +199,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarBeneficiosSocio())(w, r)
+		middleware.RequireOperador(handlers.ActualizarBeneficiosSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/listar-catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +208,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarCatalogoPlanes())(w, r)
+		middleware.RequireOperador(handlers.ListarCatalogoPlanes())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-socio/", func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +217,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarEstadoSocio())(w, r)
+		middleware.RequireOperador(handlers.ActualizarEstadoSocio())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/actualizar-estadoplan/", func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +226,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ActualizarEstadoPlan())(w, r)
+		middleware.RequireOperador(handlers.ActualizarEstadoPlan())(w, r)
 	})
 
 	mux.HandleFunc("/api/planes/detalle", func(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +257,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearMedico())(w, r)
+		middleware.RequireOperador(handlers.CrearMedico())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/sugerir-medicos", func(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +266,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.SugerirMedicosCercanos())(w, r)
+		middleware.RequireOperador(handlers.SugerirMedicosCercanos())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/borrar-medico", func(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +275,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.BorrarMedico())(w, r)
+		middleware.RequireOperador(handlers.BorrarMedico())(w, r)
 	})
 
 	mux.HandleFunc("/api/listar-medicos", func(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +284,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarMedicos())(w, r)
+		middleware.RequireOperador(handlers.ListarMedicos())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/crear-clinica", func(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +293,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CrearClinica())(w, r)
+		middleware.RequireOperador(handlers.CrearClinica())(w, r)
 	})
 
 	mux.HandleFunc("/api/listar-clinicas", func(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +302,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarClinicas())(w, r)
+		middleware.RequireOperador(handlers.ListarClinicas())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/editar-clinica", func(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +311,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.EditarClinica())(w, r)
+		middleware.RequireOperador(handlers.EditarClinica())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/borrar-clinica", func(w http.ResponseWriter, r *http.Request) {
@@ -323,7 +320,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.BorrarClinica())(w, r)
+		middleware.RequireOperador(handlers.BorrarClinica())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/asignar-clinica", func(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +329,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.AsignarClinica(firebase.MessagingClient))(w, r)
+		middleware.RequireOperador(handlers.AsignarClinica(firebase.MessagingClient))(w, r)
 	})
 
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
@@ -352,7 +349,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarTurnos())(w, r)
+		middleware.RequireOperador(handlers.ListarTurnos())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/cancelar-turno", func(w http.ResponseWriter, r *http.Request) {
@@ -361,7 +358,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.CancelarTurnoAdmin())(w, r)
+		middleware.RequireOperador(handlers.CancelarTurnoAdmin())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/geocoding-stats", func(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +403,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(
+		middleware.RequireOperador(
 			handlers.AsignarMedico(
 				firebase.MessagingClient,
 			),
@@ -432,7 +429,7 @@ func main() {
 			return
 		}
 
-		middleware.RequireAdmin(handlers.ListarEstudios())(w, r)
+		middleware.RequireOperador(handlers.ListarEstudios())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/estudios/estado", func(w http.ResponseWriter, r *http.Request) {
@@ -443,7 +440,7 @@ func main() {
 			return
 		}
 
-		middleware.RequireAdmin(handlers.CambiarEstadoEstudio())(w, r)
+		middleware.RequireOperador(handlers.CambiarEstadoEstudio())(w, r)
 	})
 
 	// ------------------------------------------------------------------
@@ -512,7 +509,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarSolicitudesServicio())(w, r)
+		middleware.RequireOperador(handlers.ListarSolicitudesServicio())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/servicios/estado", func(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +518,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(
+		middleware.RequireOperador(
 			handlers.CambiarEstadoServicio(firebase.MessagingClient),
 		)(w, r)
 	})
@@ -601,7 +598,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ListarHistorial())(w, r)
+		middleware.RequireOperador(handlers.ListarHistorial())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/auditoria", func(w http.ResponseWriter, r *http.Request) {
@@ -613,6 +610,12 @@ func main() {
 		}
 
 		middleware.RequireAdmin(handlers.ListarAuditoria())(w, r)
+	})
+
+	// Auditoría en vivo. No lleva setCORSHeaders porque un websocket no usa
+	// CORS: el Origin se valida adentro del handler, contra la misma lista.
+	mux.HandleFunc("/api/ws/admin", func(w http.ResponseWriter, r *http.Request) {
+		middleware.RequireAdmin(handlers.WsAuditoria(origenPermitido))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/servidor/metricas", func(w http.ResponseWriter, r *http.Request) {
@@ -643,7 +646,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.EstadisticasSocios)(w, r)
+		middleware.RequireOperador(handlers.EstadisticasSocios)(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/importar-socios", func(w http.ResponseWriter, r *http.Request) {
@@ -652,7 +655,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.ImportarSociosCSV())(w, r)
+		middleware.RequireOperador(handlers.ImportarSociosCSV())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/enviar-bienvenidas", func(w http.ResponseWriter, r *http.Request) {
@@ -661,7 +664,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.EnviarBienvenidas())(w, r)
+		middleware.RequireOperador(handlers.EnviarBienvenidas())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/backfill-socios-conocidos", func(w http.ResponseWriter, r *http.Request) {
@@ -670,7 +673,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		middleware.RequireAdmin(handlers.BackfillSociosConocidos())(w, r)
+		middleware.RequireOperador(handlers.BackfillSociosConocidos())(w, r)
 	})
 
 	// El stress test quemaba CPU a propósito (500k iteraciones por request).

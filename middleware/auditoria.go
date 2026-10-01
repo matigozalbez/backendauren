@@ -7,10 +7,9 @@ import (
 	"strings"
 )
 
-// RolAdminDefault es el rol que se registra mientras no exista el custom claim
-// `role`. Hoy RequireAdmin solo deja pasar admins (admin: bool), asi que todos
-// los operadores auditados son admin.
-const RolAdminDefault = "admin"
+// RolAdminDefault es el rol que se asume cuando el token no trae el claim
+// `role`. Sirve para que un admin previo al cambio no quede afuera del panel.
+const RolAdminDefault = RolAdmin
 
 // Operador identifica a la persona detras de un request autenticado.
 type Operador struct {
