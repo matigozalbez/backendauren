@@ -240,21 +240,6 @@ func CrearSocio() http.HandlerFunc {
 			}
 		}
 
-		stats, errStats := leerStats()
-		if errStats == nil {
-			stats.TotalSocios++
-			switch input.Estado {
-			case "activo":
-				stats.Activos++
-			case "inactivo":
-				stats.Inactivos++
-			case "suspendido":
-				stats.Suspendidos++
-			}
-			stats.TotalAdherentes += len(input.Adherentes)
-			guardarStats(stats)
-		}
-
 		registrarAuditoria(r, AccionSocioCrear, "socio", input.DNI, map[string]any{
 			"estado": input.Estado,
 		})
@@ -514,30 +499,6 @@ func ActualizarEstadoSocio() http.HandlerFunc {
 		if err != nil {
 			http.Error(w, "error al actualizar el socio: "+err.Error(), http.StatusInternalServerError)
 			return
-		}
-
-		// Actualizamos el contador local: restamos del estado viejo, sumamos al nuevo
-		if estadoAnterior != input.Estado {
-			stats, errStats := leerStats()
-			if errStats == nil {
-				switch estadoAnterior {
-				case "activo":
-					stats.Activos--
-				case "inactivo":
-					stats.Inactivos--
-				case "suspendido":
-					stats.Suspendidos--
-				}
-				switch input.Estado {
-				case "activo":
-					stats.Activos++
-				case "inactivo":
-					stats.Inactivos++
-				case "suspendido":
-					stats.Suspendidos++
-				}
-				guardarStats(stats)
-			}
 		}
 
 		registrarAuditoria(r, AccionSocioActualizar, "socio", input.ID, map[string]any{

@@ -306,6 +306,9 @@ func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 
 		log.Printf("TURNO CREADO en PostgreSQL id=%s uid=%s tipo=%s", turnoID, uid, input.Tipo)
 
+		// Aviso en vivo al panel: prende el numerito rojo del menú.
+		NotificarPedidoNuevo("turnos", input.Tipo)
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",

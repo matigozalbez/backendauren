@@ -427,6 +427,9 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 			def.Tipo, solicitudID, uid, esParaAdherente,
 		)
 
+		// Aviso en vivo al panel: prende el numerito rojo del menú.
+		NotificarPedidoNuevo("servicios", def.Tipo)
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",

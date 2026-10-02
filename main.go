@@ -30,7 +30,7 @@ func main() {
 
 	// Engancha el hub del websocket a registrarAuditoria, así cada evento
 	// guardado llega a los paneles abiertos.
-	handlers.ConectarNotificador()
+	handlers.ConectarNotificador(firebase.MessagingClient)
 
 	mux := http.NewServeMux()
 	handlers.AuthClient = firebase.AuthClient
@@ -40,11 +40,6 @@ func main() {
 	// (cada minuto en background). Sin esto podrían cancelarse desde la app
 	// y liberar el cupo del mes.
 	handlers.IniciarCompletadoAutomatico()
-	/*
-		if err := handlers.ReconstruirStats(); err != nil {
-			log.Fatal(err)
-		}
-	*/
 	// DarAdmin queda acá, comentado, como forma de recuperar el acceso si te
 	// quedás sin admin. Para usarlo: descomentar, `go build`, correr, y volver
 	// a comentar. Importante: el claim viaja en el ID token, así que después de
@@ -173,6 +168,16 @@ func main() {
 			return
 		}
 		handlers.RegistrarPushToken(firebase.AuthClient)(w, r)
+	})
+
+	// Tokens FCM de admins/operadores para el push de pedidos nuevos.
+	mux.HandleFunc("/api/admin/push-token", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.RegistrarPushTokenAdmin())(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/catalogo-planes", func(w http.ResponseWriter, r *http.Request) {
@@ -616,6 +621,12 @@ func main() {
 	// CORS: el Origin se valida adentro del handler, contra la misma lista.
 	mux.HandleFunc("/api/ws/admin", func(w http.ResponseWriter, r *http.Request) {
 		middleware.RequireAdmin(handlers.WsAuditoria(origenPermitido))(w, r)
+	})
+
+	// Avisos de pedidos en vivo. A diferencia del de auditoría, acá también
+	// entra el operador: es el que acepta turnos y servicios.
+	mux.HandleFunc("/api/ws/pedidos", func(w http.ResponseWriter, r *http.Request) {
+		middleware.RequireOperador(handlers.WsPedidos(origenPermitido))(w, r)
 	})
 
 	mux.HandleFunc("/api/admin/servidor/metricas", func(w http.ResponseWriter, r *http.Request) {

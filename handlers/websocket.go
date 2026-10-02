@@ -9,6 +9,7 @@ import (
 
 	"aurenbackend/middleware"
 
+	"firebase.google.com/go/v4/messaging"
 	"github.com/gorilla/websocket"
 )
 
@@ -27,8 +28,12 @@ const (
 	wsBufferEventos = 32
 )
 
-// HubAuditoria reparte los eventos de auditoría entre los clientes conectados.
+// HubAuditoria reparte eventos entre los clientes conectados. Se usa para el
+// canal de auditoría (solo admin) y para el de pedidos (operador y admin): son
+// dos instancias separadas, así un operador nunca recibe auditoría. El nombre
+// es solo para los logs.
 type HubAuditoria struct {
+	nombre   string
 	mu       sync.RWMutex
 	clientes map[*clienteWS]struct{}
 }
@@ -84,7 +89,12 @@ func (c *clienteWS) cerrarCanal(codigo int) {
 	})
 }
 
-var hubAuditoria = &HubAuditoria{clientes: make(map[*clienteWS]struct{})}
+var hubAuditoria = &HubAuditoria{nombre: "auditoría", clientes: make(map[*clienteWS]struct{})}
+
+// hubPedidos lleva los avisos de solicitudes nuevas a todo el que opera
+// turnos/servicios. Va aparte del de auditoría para no filtrarle al operador
+// eventos que no le corresponden.
+var hubPedidos = &HubAuditoria{nombre: "pedidos", clientes: make(map[*clienteWS]struct{})}
 
 // Suscribir agrega la conexión al hub y se queda en la lectura hasta que el
 // cliente se va. La escritura corre en su propia goroutine.
@@ -103,7 +113,7 @@ func (h *HubAuditoria) Suscribir(conn *websocket.Conn, operador *middleware.Oper
 	h.clientes[c] = struct{}{}
 	conectados := len(h.clientes)
 	h.mu.Unlock()
-	log.Printf("[WS] auditoría: conectado %s (%s) — %d en vivo", c.operador, c.rol, conectados)
+	log.Printf("[WS] %s: conectado %s (%s) — %d en vivo", h.nombre, c.operador, c.rol, conectados)
 
 	go c.escribir()
 
@@ -116,7 +126,7 @@ func (h *HubAuditoria) Suscribir(conn *websocket.Conn, operador *middleware.Oper
 	// Puede que CerrarSesion ya lo haya cerrado (revocación), por eso va por
 	// cerrarCanal y no por un close directo.
 	c.cerrarCanal(wsCierreNormal)
-	log.Printf("[WS] auditoría: desconectado %s (%s) — %d en vivo", c.operador, c.rol, restantes)
+	log.Printf("[WS] %s: desconectado %s (%s) — %d en vivo", h.nombre, c.operador, c.rol, restantes)
 }
 
 // leer corre el loop de lectura. Las lecturas no sirven para recibir datos sino
@@ -172,11 +182,19 @@ func (c *clienteWS) escribir() {
 	}
 }
 
-// Difundir manda el evento a todos los clientes. No bloquea.
+// Difundir manda el evento de auditoría a todos los clientes. No bloquea.
 func (h *HubAuditoria) Difundir(ev EventoAuditoria) {
-	payload, err := json.Marshal(map[string]any{"tipo": "auditoria", "evento": ev})
+	h.DifundirTipo("auditoria", ev)
+}
+
+// DifundirTipo manda un payload cualquiera, etiquetado con el tipo indicado, a
+// todos los clientes del hub. No bloquea: si el buffer de una conexión lenta
+// está lleno, el evento se descarta para esa conexión (la pantalla igual carga
+// por HTTP).
+func (h *HubAuditoria) DifundirTipo(tipo string, v any) {
+	payload, err := json.Marshal(map[string]any{"tipo": tipo, "evento": v})
 	if err != nil {
-		log.Printf("[WS] auditoría: no se pudo serializar el evento: %v", err)
+		log.Printf("[WS] %s: no se pudo serializar el evento: %v", h.nombre, err)
 		return
 	}
 
@@ -187,7 +205,7 @@ func (h *HubAuditoria) Difundir(ev EventoAuditoria) {
 		select {
 		case c.enviar <- payload:
 		default:
-			log.Printf("[WS] auditoría: buffer lleno para %s, evento descartado", c.operador)
+			log.Printf("[WS] %s: buffer lleno para %s, evento descartado", h.nombre, c.operador)
 		}
 	}
 }
@@ -215,26 +233,30 @@ func (h *HubAuditoria) CerrarSesion(uid string) int {
 	h.mu.Unlock()
 
 	for _, c := range aCerrar {
-		log.Printf("[WS] auditoría: cierre por revocación de %s (%s)", c.operador, c.rol)
+		log.Printf("[WS] %s: cierre por revocación de %s (%s)", h.nombre, c.operador, c.rol)
 		c.cerrarCanal(wsCierreRevocado)
 	}
 
 	return len(aCerrar)
 }
 
-// WsAuditoria sirve GET /api/ws/admin, solo-para-lectura y solo-admin: transmite
-// la auditoría, que el operador no puede leer por HTTP.
+// wsUpgrader arma el upgrader validando el Origin contra la lista del panel.
+func wsUpgrader(origenPermitido func(string) bool) websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     func(r *http.Request) bool { return origenPermitido(r.Header.Get("Origin")) },
+	}
+}
+
+// servirWS son las validaciones comunes del handshake.
 //
 // origenPermitido se recibe por parámetro porque la lista de orígenes vive en
 // el package main (cors.go) y el upgrade a websocket no pasa por
 // setCORSHeaders: sin validar el Origin acá, el endpoint queda abierto a
 // cualquier sitio.
-func WsAuditoria(origenPermitido func(string) bool) http.HandlerFunc {
-	upgrader := websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin:     func(r *http.Request) bool { return origenPermitido(r.Header.Get("Origin")) },
-	}
+func servirWS(hub *HubAuditoria, origenPermitido func(string) bool) http.HandlerFunc {
+	upgrader := wsUpgrader(origenPermitido)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -260,25 +282,46 @@ func WsAuditoria(origenPermitido func(string) bool) http.HandlerFunc {
 		conn, err := upgrader.Upgrade(w, r, responseHeader)
 		if err != nil {
 			// Upgrade ya respondió.
-			log.Printf("[WS] auditoría: upgrade fallido: %v", err)
+			log.Printf("[WS] %s: upgrade fallido: %v", hub.nombre, err)
 			return
 		}
 
 		// El middleware ya validó el token y dejó al operador en el context.
-		hubAuditoria.Suscribir(conn, middleware.OperadorDesdeContext(r.Context()))
+		hub.Suscribir(conn, middleware.OperadorDesdeContext(r.Context()))
 	}
 }
 
-// ConectarNotificador engancha el hub con registrarAuditoria. Se llama una vez
-// desde main, así que los call sites de registrarAuditoria no cambian.
-func ConectarNotificador() {
+// WsAuditoria sirve GET /api/ws/admin, solo-para-lectura y solo-admin: transmite
+// la auditoría, que el operador no puede leer por HTTP.
+func WsAuditoria(origenPermitido func(string) bool) http.HandlerFunc {
+	return servirWS(hubAuditoria, origenPermitido)
+}
+
+// WsPedidos sirve GET /api/ws/pedidos: avisa en vivo de las solicitudes nuevas
+// a todo el que opera turnos y servicios (operador y admin).
+func WsPedidos(origenPermitido func(string) bool) http.HandlerFunc {
+	return servirWS(hubPedidos, origenPermitido)
+}
+
+// ConectarNotificador engancha los hubs con los notificadores. Se llama una vez
+// desde main, así que los call sites de registrarAuditoria y de las altas no
+// cambian. msgClient es el cliente FCM: con él también se manda el push de los
+// pedidos, además del aviso en vivo por websocket.
+func ConectarNotificador(msgClient *messaging.Client) {
 	notificarEnVivo = func(ev EventoAuditoria) {
 		hubAuditoria.Difundir(ev)
 	}
+	notificarPedidoNuevo = func(p PedidoNuevo) {
+		hubPedidos.DifundirTipo("pedido", p)
+		// En goroutine: el push no debe frenar el alta del socio.
+		go EnviarPushPedidoNuevo(msgClient, p)
+	}
 }
 
-// CerrarSesionWS le pasa al hub la sesión a cortar. RevocarAdmin la usa para
-// que la revocación también corte el websocket de esa persona.
+// CerrarSesionWS corta los websockets abiertos de una persona. RevocarAdmin la
+// usa para que la revocación también cierre las conexiones en vivo.
 func CerrarSesionWS(uid string) int {
-	return hubAuditoria.CerrarSesion(uid)
+	cerrados := hubAuditoria.CerrarSesion(uid)
+	cerrados += hubPedidos.CerrarSesion(uid)
+	return cerrados
 }
