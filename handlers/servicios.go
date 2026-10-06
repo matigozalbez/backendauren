@@ -329,6 +329,10 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 			return
 		}
 
+		if !gateTerminosServicios(ctx, w, socio.DNI) {
+			return
+		}
+
 		socioData := socio.Data()
 
 		acceso := evaluarAccesoServicio(socioData, def)

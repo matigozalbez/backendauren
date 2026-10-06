@@ -22,3 +22,4 @@ server.log
 pg_test.bat
 migracion_pg.sql
 migracion_servicios.sql
+migracion_terminos.sql

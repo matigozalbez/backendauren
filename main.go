@@ -256,6 +256,47 @@ func main() {
 		limiterCambioPassword.Middleware(handlers.CambiarPassword)(w, r)
 	})
 
+	// Términos y Condiciones.
+	//
+	// El `aceptar` es público porque en el primer ingreso todavía no hay
+	// cuenta ni token; la identidad la resuelve el handler adentro (con el
+	// Bearer si viene, o contra codigos_verificacion.verificado si no).
+	mux.HandleFunc("/api/terminos/vigente", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.TerminosVigente(w, r)
+	})
+
+	mux.HandleFunc("/api/terminos/aceptar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.AceptarTerminos(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/terminos/mi-aceptacion", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.MisTerminos(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/terminos", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.PublicarTerminos())(w, r)
+	})
+
 	mux.HandleFunc("/api/admin/crear-medico", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {

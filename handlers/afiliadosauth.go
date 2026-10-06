@@ -450,6 +450,22 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gate de Términos y Condiciones. El checkbox del paso 3 no alcanza: con
+	// solo eso se podría crear la cuenta mandando este request a mano. Si no
+	// hay registro de aceptación de la versión vigente para este DNI, no se
+	// crea el uid. (Si todavía no hay términos publicados, pasa: no hay nada
+	// que aceptar.)
+	aceptado, err := TerminosAceptadosParaDNI(ctx, req.DNI)
+	if err != nil {
+		log.Printf("error verificando aceptación de términos para dni %s: %v", req.DNI, err)
+		http.Error(w, "No pudimos verificar tu aceptación, intentá de nuevo", http.StatusInternalServerError)
+		return
+	}
+	if !aceptado {
+		http.Error(w, "Tenés que aceptar los Términos y Condiciones para continuar", http.StatusForbidden)
+		return
+	}
+
 	// Chequeo extra: puede que este mail YA tenga cuenta en Firebase Auth
 	// por otra vía (ej. Google Sign-In previo) aunque nosotros nunca nos
 	// enteramos. En ese caso no creamos una cuenta nueva, vinculamos
@@ -465,10 +481,23 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 		}
 
 		PGPool.Exec(ctx, `UPDATE socios SET uid = $2, actualizado_en = now() WHERE dni = $1`, req.DNI, usuarioExistente.UID)
+		marcarUIDAceptacion(ctx, req.DNI, usuarioExistente.UID)
 		PGPool.Exec(ctx, `DELETE FROM codigos_verificacion WHERE dni = $1`, req.DNI)
 
+		// Mismo patrón que CambiarPassword: custom token para dejar al usuario
+		// logueado apenas termina el primer ingreso, sin que tenga que volver
+		// a escribir el mail y la contraseña. Si falla, queda con el uid y se
+		// loguea manual; la cuenta ya se vinculó bien.
+		customToken, err := AuthClient.CustomToken(ctx, usuarioExistente.UID)
+		if err != nil {
+			log.Printf("error generando custom token para uid %s: %v", usuarioExistente.UID, err)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"uid": usuarioExistente.UID, "vinculado": "true"})
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"uid": usuarioExistente.UID, "vinculado": "true"})
+		json.NewEncoder(w).Encode(map[string]string{"uid": usuarioExistente.UID, "vinculado": "true", "customToken": customToken})
 		return
 	}
 
@@ -487,12 +516,23 @@ func CrearPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Vinculamos el UID de Auth con el socio
 	PGPool.Exec(ctx, `UPDATE socios SET uid = $2, actualizado_en = now() WHERE dni = $1`, req.DNI, userRecord.UID)
+	marcarUIDAceptacion(ctx, req.DNI, userRecord.UID)
 
 	// Limpiamos el código, ya cumplió su función
 	PGPool.Exec(ctx, `DELETE FROM codigos_verificacion WHERE dni = $1`, req.DNI)
 
+	// Custom token para loguear directo al socio recién creado (ver rama de
+	// usuario existente arriba).
+	customToken, err := AuthClient.CustomToken(ctx, userRecord.UID)
+	if err != nil {
+		log.Printf("error generando custom token para uid %s: %v", userRecord.UID, err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"uid": userRecord.UID})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"uid": userRecord.UID})
+	json.NewEncoder(w).Encode(map[string]string{"uid": userRecord.UID, "customToken": customToken})
 }
 
 func CambiarPassword(w http.ResponseWriter, r *http.Request) {

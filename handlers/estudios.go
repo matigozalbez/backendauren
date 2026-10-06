@@ -48,6 +48,10 @@ func SubirImagenEstudio(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
+		if !gateTerminosServiciosUID(context.Background(), w, uid) {
+			return
+		}
+
 		if err := r.ParseMultipartForm(maxImagenEstudioBytes + (1 << 20)); err != nil {
 			http.Error(w, "imagen demasiado grande o multipart inválido", http.StatusBadRequest)
 			return

@@ -38,6 +38,7 @@ const (
 	AccionPermisoOtorgar      = "permiso.otorgar"
 	AccionPermisoRevocar      = "permiso.revocar"
 	AccionPermisoCrearAdmin   = "permiso.crear_admin"
+	AccionTerminosPublicar    = "terminos.publicar"
 )
 
 var accionesAuditadas = map[string]struct{}{
@@ -63,6 +64,7 @@ var accionesAuditadas = map[string]struct{}{
 	AccionPermisoOtorgar:      {},
 	AccionPermisoRevocar:      {},
 	AccionPermisoCrearAdmin:   {},
+	AccionTerminosPublicar:    {},
 }
 
 // EventoAuditoria es un registro ya persistido, en la forma en que la

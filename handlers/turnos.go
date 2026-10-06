@@ -202,6 +202,10 @@ func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
+		if !gateTerminosServicios(ctx, w, socio.DNI) {
+			return
+		}
+
 		socioData := socio.Data()
 
 		// Los turnos y estudios médicos son servicios exclusivos de Auren Salud.

@@ -297,6 +297,10 @@ func VincularSocio(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
+		// Si el socio aceptó los términos justo antes de vincularse, la
+		// aceptación quedó sin uid (aún no existía); se completa ahora.
+		marcarUIDAceptacion(ctx, input.DNI, uid)
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -316,7 +320,21 @@ func VerificarVinculacion(authClient *auth.Client) http.HandlerFunc {
 			`SELECT EXISTS(SELECT 1 FROM socios WHERE uid = $1)`, uid,
 		).Scan(&vinculado)
 
-		json.NewEncoder(w).Encode(map[string]bool{"vinculado": vinculado})
+		// terminosAceptados le dice al front si este socio está al día con la
+		// versión vigente de los T&C. Sin socio vinculado no importa: el
+		// login va a /vincular-dni igual, que tiene prioridad.
+		terminosAceptados := true
+		if vinculado {
+			socio, err := leerSocioPorUID(ctx, uid)
+			if err == nil {
+				terminosAceptados, _ = TerminosAceptadosParaDNI(ctx, socio.DNI)
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]bool{
+			"vinculado":         vinculado,
+			"terminosAceptados": terminosAceptados,
+		})
 	}
 }
 
