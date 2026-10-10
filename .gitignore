@@ -10,6 +10,7 @@ AGENTS.md
 pg_test.bat
 migracion_pg.sql
 PLAN_MIGRACION.md
+migracion_opticas_ortopedias.sql
 
 # Binarios compilados y logs: no van al repo.
 aurenbackend

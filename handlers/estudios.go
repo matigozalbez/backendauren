@@ -165,6 +165,7 @@ func CambiarEstadoEstudio() http.HandlerFunc {
 		var input struct {
 			TurnoID string `json:"turnoId"`
 			Estado  string `json:"estado"`
+			Motivo  string `json:"motivo"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -173,6 +174,7 @@ func CambiarEstadoEstudio() http.HandlerFunc {
 
 		input.TurnoID = strings.TrimSpace(input.TurnoID)
 		input.Estado = strings.TrimSpace(input.Estado)
+		input.Motivo = strings.TrimSpace(input.Motivo)
 		if !estadosEstudioValidos[input.Estado] {
 			http.Error(w, "estado inválido", http.StatusBadRequest)
 			return
@@ -204,6 +206,33 @@ func CambiarEstadoEstudio() http.HandlerFunc {
 		detalle["estado"] = input.Estado
 
 		registrarAuditoria(r, AccionEstudioEstado, "estudio", input.TurnoID, detalle)
+
+		// Un rechazo guarda el motivo y avisa por mail al socio. Los demás
+		// estados del estudio no mandan correo (definido con el usuario).
+		if input.Estado == "rechazado" {
+			if input.Motivo != "" {
+				if _, err := PGPool.Exec(ctx, `
+					UPDATE turnos SET motivo = $2 WHERE id::text = $1`,
+					input.TurnoID, input.Motivo,
+				); err != nil {
+					log.Printf("WARNING: no se pudo guardar el motivo del estudio rechazado %s: %v", input.TurnoID, err)
+				}
+			}
+
+			if socioEmail != "" {
+				err := enviarEmailSolicitud(datosMailSolicitud{
+					Estado:       "rechazado",
+					Destinatario: socioEmail,
+					Beneficiario: beneficiarioNombre,
+					Tipo:         "estudio",
+					Concepto:     especialidad,
+					Motivo:       input.Motivo,
+				})
+				if err != nil {
+					log.Printf("ERROR enviando email de estudio rechazado a %s: %v", socioEmail, err)
+				}
+			}
+		}
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

@@ -2,7 +2,7 @@ package handlers
 
 // handlers/servicios.go
 //
-// Servicios con solicitud: grúa, sepelios y médico a domicilio.
+// Servicios con solicitud: grúa, sepelios, médico a domicilio y óptica/ortopedia.
 //
 // Los tres se guardan en la MISMA tabla "turnos" que los turnos y estudios
 // médicos, distinguished por la columna "tipo". Reutilizar la tabla es a
@@ -99,6 +99,17 @@ var (
 		IconoPush:            "🏠",
 		CopiaPush:            "Tu solicitud de médico a domicilio fue procesada.",
 	}
+
+	ServicioOpticaOrtopedia = definicionServicio{
+		Tipo:                 "opticaortopedia",
+		Etiqueta:             "óptica y ortopedia",
+		Planes:               []string{nombrePlanSalud},
+		EtiquetaEspecialidad: "Seleccioná una opción",
+		CopiaEspecialidad:    "Elegí si necesitás óptica u ortopedia.",
+		OpcionesEspecialidad: []string{"Óptica", "Ortopedia"},
+		IconoPush:            "👓",
+		CopiaPush:            "Tu solicitud de óptica y ortopedia fue procesada.",
+	}
 )
 
 // definicionesPorTipo indexa los servicios por su tipo, para que los handlers
@@ -107,6 +118,7 @@ var definicionesPorTipo = map[string]definicionServicio{
 	ServicioGrua.Tipo:            ServicioGrua,
 	ServicioSepelios.Tipo:        ServicioSepelios,
 	ServicioMedicoDomicilio.Tipo: ServicioMedicoDomicilio,
+	ServicioOpticaOrtopedia.Tipo: ServicioOpticaOrtopedia,
 }
 
 // Estados válidos de un servicio con solicitud, desde el panel admin.
@@ -256,6 +268,12 @@ func CrearSolicitudSepelios(authClient *auth.Client) http.HandlerFunc {
 // servicio, solo lugar y motivo.
 func CrearSolicitudMedicoDomicilio(authClient *auth.Client) http.HandlerFunc {
 	return crearSolicitud(authClient, ServicioMedicoDomicilio)
+}
+
+// CrearSolicitudOpticaOrtopedia requiere "Auren Salud". El socio elige entre
+// óptica u ortopedia en el primer select.
+func CrearSolicitudOpticaOrtopedia(authClient *auth.Client) http.HandlerFunc {
+	return crearSolicitud(authClient, ServicioOpticaOrtopedia)
 }
 
 // crearSolicitud es el handler único de los tres servicios. Lo que cambia entre
@@ -570,6 +588,10 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 			Fecha       string `json:"fecha"`
 			Hora        string `json:"hora"`
 			Motivo      string `json:"motivo"`
+
+			// Para óptica y ortopedia: el id del establecimiento que el panel
+			// elige de la lista creada en el menú "Ópticas / Ortopedias".
+			PrestadorID int `json:"prestadorId"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -606,16 +628,16 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 		// Leemos la solicitud actual: necesitamos el uid para el push y para
 		// no dejar cambiar de estado algo ya cancelado.
 		var uid, estadoActual, concepto, fechaActual, horaActual string
-		var beneficiarioNombre, socioEmail string
+		var beneficiarioNombre, socioEmail, direccionServicio string
 		var esParaAdherente bool
 		err := PGPool.QueryRow(ctx, `
 			SELECT uid, estado, COALESCE(especialidad,''), COALESCE(fecha,''), COALESCE(hora,''),
 			       COALESCE(beneficiario_nombre,''), COALESCE(socio_email,''),
-			       COALESCE(es_para_adherente,FALSE)
+			       COALESCE(es_para_adherente,FALSE), COALESCE(direccion,'')
 			FROM turnos WHERE id::text = $1 AND tipo = $2`,
 			input.TurnoID, def.Tipo,
 		).Scan(&uid, &estadoActual, &concepto, &fechaActual, &horaActual,
-			&beneficiarioNombre, &socioEmail, &esParaAdherente)
+			&beneficiarioNombre, &socioEmail, &esParaAdherente, &direccionServicio)
 
 		if err != nil {
 			http.Error(w, "solicitud no encontrada", http.StatusNotFound)
@@ -631,11 +653,46 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 			return
 		}
 
+		// El panel puede asignar un establecimiento (óptica/ortopedia) en vez
+		// de un profesional tipeado. En ese caso los datos que quedan guardados
+		// son los del catálogo: nombre del local y dirección completa, para que
+		// el socio vea a dónde ir.
+		profesionalFinal := input.Profesional
+		direccionPrestador := ""
+		apellido := ""
+
+		if input.PrestadorID > 0 {
+			var pNombre, pDireccion, pCiudad, pProvincia string
+			if err := PGPool.QueryRow(ctx, `
+				SELECT COALESCE(nombre,''), COALESCE(direccion,''), COALESCE(ciudad,''), COALESCE(provincia,'')
+				FROM opticas_ortopedias WHERE id = $1`,
+				input.PrestadorID,
+			).Scan(&pNombre, &pDireccion, &pCiudad, &pProvincia); err != nil {
+				http.Error(w, "óptica/ortopedia no encontrada", http.StatusNotFound)
+				return
+			}
+			profesionalFinal = pNombre
+			partes := make([]string, 0, 3)
+			for _, p := range []string{pDireccion, pCiudad, pProvincia} {
+				if strings.TrimSpace(p) != "" {
+					partes = append(partes, strings.TrimSpace(p))
+				}
+			}
+			direccionPrestador = strings.Join(partes, ", ")
+		} else {
+			// Guardamos el profesional en las columnas que el panel ya conoce
+			// (medico_nombre / medico_apellido), así el card del panel los
+			// muestra sin campos nuevos. El último token es el apellido.
+			if partes := strings.Fields(profesionalFinal); len(partes) > 1 {
+				apellido = partes[len(partes)-1]
+			}
+		}
+
 		// Si viene profesional, la solicitud queda asignada a ese profesional
 		// con la fecha y hora que mande el panel. Si no viene, solo cambia el
 		// estado y el motivo (rechazo con motivo, por ejemplo).
 		estadoFinal := input.Estado
-		if input.Profesional != "" && estadoFinal == "pendiente" {
+		if profesionalFinal != "" && estadoFinal == "pendiente" {
 			estadoFinal = "asignado"
 		}
 
@@ -646,14 +703,6 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 		horaFinal := horaActual
 		if input.Hora != "" {
 			horaFinal = input.Hora
-		}
-
-		// Guardamos el profesional en las columnas que el panel ya conoce
-		// (medico_nombre / medico_apellido), así el card del panel los muestra
-		// sin campos nuevos.
-		apellido := ""
-		if partes := strings.Fields(input.Profesional); len(partes) > 1 {
-			apellido = partes[len(partes)-1]
 		}
 
 		if estadoFinal == "cancelado" {
@@ -674,10 +723,11 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 					medico_apellido = $5,
 					fecha = $6,
 					hora = $7,
+					medico_direccion = $8,
 					asignado_en = CASE WHEN $3 = 'asignado' THEN NOW() ELSE asignado_en END
 				WHERE id::text = $1 AND tipo = $2`,
-				input.TurnoID, def.Tipo, estadoFinal, input.Profesional, apellido,
-				fechaFinal, horaFinal,
+				input.TurnoID, def.Tipo, estadoFinal, profesionalFinal, apellido,
+				fechaFinal, horaFinal, direccionPrestador,
 			)
 		}
 
@@ -710,6 +760,34 @@ func CambiarEstadoServicio(msgClient *messaging.Client) http.HandlerFunc {
 		// hacerlo sonar el teléfono al pedo.
 		if debeNotificarServicio(estadoActual, estadoFinal) {
 			enviarPushEstadoServicio(ctx, msgClient, uid, def, concepto, estadoFinal, fechaFinal, horaFinal, input.Motivo)
+		}
+
+		// ---- Email al socio ----
+		//
+		// Solo en asignado y rechazado: los servicios no mandan mail de
+		// completado (definido con el usuario).
+		if socioEmail != "" && (estadoFinal == "asignado" || estadoFinal == "rechazado") {
+			direccionMail := direccionServicio
+			if direccionPrestador != "" {
+				direccionMail = direccionPrestador
+			}
+			err := enviarEmailSolicitud(datosMailSolicitud{
+				Estado:       estadoFinal,
+				Destinatario: socioEmail,
+				Beneficiario: beneficiarioNombre,
+				Tipo:         def.Tipo,
+				Concepto:     concepto,
+				Profesional:  profesionalFinal,
+				Direccion:    direccionMail,
+				Fecha:        fechaFinal,
+				Hora:         horaFinal,
+				Motivo:       input.Motivo,
+			})
+			if err != nil {
+				log.Printf("ERROR enviando email de %s a %s: %v", def.Tipo, socioEmail, err)
+			} else {
+				log.Printf("EMAIL de %s enviado a %s", def.Tipo, socioEmail)
+			}
 		}
 
 		detalle := detalleBeneficiario(beneficiarioNombre, socioEmail, "", esParaAdherente)

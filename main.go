@@ -378,6 +378,44 @@ func main() {
 		middleware.RequireOperador(handlers.AsignarClinica(firebase.MessagingClient))(w, r)
 	})
 
+	// Ópticas y ortopedias: el catálogo que el panel admin crea y del que se
+	// elige el establecimiento al asignar esa solicitud.
+	mux.HandleFunc("/api/admin/crear-optica-ortopedia", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.CrearOpticaOrtopedia())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/editar-optica-ortopedia", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.EditarOpticaOrtopedia())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/borrar-optica-ortopedia", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.BorrarOpticaOrtopedia())(w, r)
+	})
+
+	mux.HandleFunc("/api/listar-opticas-ortopedias", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.ListarOpticasOrtopedias())(w, r)
+	})
+
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 
@@ -490,15 +528,17 @@ func main() {
 	})
 
 	// ------------------------------------------------------------------
-	// Servicios con solicitud: grúa, sepelios y médico a domicilio.
+	// Servicios con solicitud: grúa, sepelios, médico a domicilio y óptica
+	// y ortopedia.
 	//
 	// Se guardan en la misma tabla "turnos" que los turnos y estudios, con
-	// tipo = 'grua' | 'sepelios' | 'domicilio'. Cada uno tiene su propio
-	// endpoint de alta porque cada uno exige un plan distinto:
+	// tipo = 'grua' | 'sepelios' | 'domicilio' | 'opticaortopedia'. Cada uno
+	// tiene su propio endpoint de alta porque cada uno exige un plan distinto:
 	//
-	//   grúa      -> "Auren en Ruta +"
-	//   sepelios  -> "Auren Salud" + "Auren Sepelio +"
-	//   domicilio -> "Auren Salud"
+	//   grúa            -> "Auren en Ruta +"
+	//   sepelios        -> "Auren Salud" + "Auren Sepelio +"
+	//   domicilio       -> "Auren Salud"
+	//   óptica/ortopedia -> "Auren Salud"
 	//
 	// "Seguro de vida" no aparece acá: por ahora es solo una tarjeta en la app,
 	// sin solicitud ni form.
@@ -529,6 +569,15 @@ func main() {
 			return
 		}
 		handlers.CrearSolicitudMedicoDomicilio(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/servicios/opticaortopedia", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.CrearSolicitudOpticaOrtopedia(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/servicios/cancelar", func(w http.ResponseWriter, r *http.Request) {

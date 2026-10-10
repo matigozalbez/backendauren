@@ -16,55 +16,61 @@ import (
 // Acciones auditadas. El panel las usa para armar la frase legible de cada
 // fila, asi que un codigo nuevo tiene que agregarse a la allowlist de abajo.
 const (
-	AccionSocioCrear          = "socio.crear"
-	AccionSocioActualizar     = "socio.actualizar"
-	AccionSocioPlanEstado     = "socio.plan_estado"
-	AccionSocioBeneficios     = "socio.beneficios"
-	AccionSocioImportarCSV    = "socio.importar_csv"
-	AccionSocioBackfill       = "socio.backfill"
-	AccionNotifCrear          = "notificacion.crear"
-	AccionNotifBienvenidas    = "notificacion.bienvenidas"
-	AccionPlanUpsert          = "plan.upsert"
-	AccionTurnoAsignarMedico  = "turno.asignar_medico"
-	AccionTurnoAsignarClinica = "turno.asignar_clinica"
-	AccionTurnoCancelar       = "turno.cancelar"
-	AccionEstudioEstado       = "estudio.cambiar_estado"
-	AccionServicioEstado      = "servicio.cambiar_estado"
-	AccionMedicoCrear         = "medico.crear"
-	AccionMedicoBorrar        = "medico.borrar"
-	AccionClinicaCrear        = "clinica.crear"
-	AccionClinicaEditar       = "clinica.editar"
-	AccionClinicaBorrar       = "clinica.borrar"
-	AccionPermisoOtorgar      = "permiso.otorgar"
-	AccionPermisoRevocar      = "permiso.revocar"
-	AccionPermisoCrearAdmin   = "permiso.crear_admin"
-	AccionTerminosPublicar    = "terminos.publicar"
+	AccionSocioCrear            = "socio.crear"
+	AccionSocioActualizar       = "socio.actualizar"
+	AccionSocioPlanEstado       = "socio.plan_estado"
+	AccionSocioBeneficios       = "socio.beneficios"
+	AccionSocioImportarCSV      = "socio.importar_csv"
+	AccionSocioBackfill         = "socio.backfill"
+	AccionNotifCrear            = "notificacion.crear"
+	AccionNotifBienvenidas      = "notificacion.bienvenidas"
+	AccionPlanUpsert            = "plan.upsert"
+	AccionTurnoAsignarMedico    = "turno.asignar_medico"
+	AccionTurnoAsignarClinica   = "turno.asignar_clinica"
+	AccionTurnoCancelar         = "turno.cancelar"
+	AccionEstudioEstado         = "estudio.cambiar_estado"
+	AccionServicioEstado        = "servicio.cambiar_estado"
+	AccionMedicoCrear           = "medico.crear"
+	AccionMedicoBorrar          = "medico.borrar"
+	AccionClinicaCrear          = "clinica.crear"
+	AccionClinicaEditar         = "clinica.editar"
+	AccionClinicaBorrar         = "clinica.borrar"
+	AccionPermisoOtorgar        = "permiso.otorgar"
+	AccionPermisoRevocar        = "permiso.revocar"
+	AccionPermisoCrearAdmin     = "permiso.crear_admin"
+	AccionTerminosPublicar      = "terminos.publicar"
+	AccionOpticaOrtopediaCrear  = "optica_ortopedia.crear"
+	AccionOpticaOrtopediaEditar = "optica_ortopedia.editar"
+	AccionOpticaOrtopediaBorrar = "optica_ortopedia.borrar"
 )
 
 var accionesAuditadas = map[string]struct{}{
-	AccionSocioCrear:          {},
-	AccionSocioActualizar:     {},
-	AccionSocioPlanEstado:     {},
-	AccionSocioBeneficios:     {},
-	AccionSocioImportarCSV:    {},
-	AccionSocioBackfill:       {},
-	AccionNotifCrear:          {},
-	AccionNotifBienvenidas:    {},
-	AccionPlanUpsert:          {},
-	AccionTurnoAsignarMedico:  {},
-	AccionTurnoAsignarClinica: {},
-	AccionTurnoCancelar:       {},
-	AccionEstudioEstado:       {},
-	AccionServicioEstado:      {},
-	AccionMedicoCrear:         {},
-	AccionMedicoBorrar:        {},
-	AccionClinicaCrear:        {},
-	AccionClinicaEditar:       {},
-	AccionClinicaBorrar:       {},
-	AccionPermisoOtorgar:      {},
-	AccionPermisoRevocar:      {},
-	AccionPermisoCrearAdmin:   {},
-	AccionTerminosPublicar:    {},
+	AccionSocioCrear:            {},
+	AccionSocioActualizar:       {},
+	AccionSocioPlanEstado:       {},
+	AccionSocioBeneficios:       {},
+	AccionSocioImportarCSV:      {},
+	AccionSocioBackfill:         {},
+	AccionNotifCrear:            {},
+	AccionNotifBienvenidas:      {},
+	AccionPlanUpsert:            {},
+	AccionTurnoAsignarMedico:    {},
+	AccionTurnoAsignarClinica:   {},
+	AccionTurnoCancelar:         {},
+	AccionEstudioEstado:         {},
+	AccionServicioEstado:        {},
+	AccionMedicoCrear:           {},
+	AccionMedicoBorrar:          {},
+	AccionClinicaCrear:          {},
+	AccionClinicaEditar:         {},
+	AccionClinicaBorrar:         {},
+	AccionPermisoOtorgar:        {},
+	AccionPermisoRevocar:        {},
+	AccionPermisoCrearAdmin:     {},
+	AccionTerminosPublicar:      {},
+	AccionOpticaOrtopediaCrear:  {},
+	AccionOpticaOrtopediaEditar: {},
+	AccionOpticaOrtopediaBorrar: {},
 }
 
 // EventoAuditoria es un registro ya persistido, en la forma en que la

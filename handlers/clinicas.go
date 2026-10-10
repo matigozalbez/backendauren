@@ -558,18 +558,17 @@ func AsignarClinica(
 
 		// Email.
 		if socioEmail != "" {
-			err := enviarEmailTurnoAsignado(
-				esEstudio,
-				socioEmail,
-				beneficiarioNombre,
-				especialidad,
-				"",
-				clinicaNombre,
-				"",
-				clinicaDireccion,
-				fechaFinal,
-				horaFinal,
-			)
+			err := enviarEmailSolicitud(datosMailSolicitud{
+				Estado:       "asignado",
+				Destinatario: socioEmail,
+				Beneficiario: beneficiarioNombre,
+				Tipo:         tipoTurno,
+				Concepto:     especialidad,
+				Profesional:  clinicaNombre,
+				Direccion:    clinicaDireccion,
+				Fecha:        fechaFinal,
+				Hora:         horaFinal,
+			})
 			if err != nil {
 				log.Printf("ERROR enviando email de turno a %s: %v", socioEmail, err)
 			}

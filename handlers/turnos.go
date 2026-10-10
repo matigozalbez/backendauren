@@ -49,26 +49,28 @@ var franjasPreferidasValidas = map[string]bool{
 // pero el cupo se cuenta contra la misma tabla "turnos", así que el conteo es
 // compartido.
 var cupoMensualPorTipo = map[string]int{
-	"consulta":  1,
-	"estudio":   1,
-	"grua":      1,
-	"sepelios":  1,
-	"domicilio": 1,
+	"consulta":        1,
+	"estudio":         1,
+	"grua":            1,
+	"sepelios":        1,
+	"domicilio":       1,
+	"opticaortopedia": 1,
 }
 
 // etiquetaPorTipo es cómo se llama cada tipo en los mensajes al socio.
 var etiquetaPorTipo = map[string]string{
-	"consulta":  "turno",
-	"estudio":   "estudio",
-	"grua":      "grúa",
-	"sepelios":  "servicio sepelial",
-	"domicilio": "médico a domicilio",
+	"consulta":        "turno",
+	"estudio":         "estudio",
+	"grua":            "grúa",
+	"sepelios":        "servicio sepelial",
+	"domicilio":       "médico a domicilio",
+	"opticaortopedia": "óptica y ortopedia",
 }
 
 // esTipoSolicitud dice si el tipo corresponde a un servicio con solicitud
-// (grúa, sepelios, médico a domicilio). Esos servicios tienen su propio
-// endpoint de alta y su propio gate de plan, así que no entran por
-// /api/crear-turno.
+// (grúa, sepelios, médico a domicilio, óptica y ortopedia). Esos servicios
+// tienen su propio endpoint de alta y su propio gate de plan, así que no
+// entran por /api/crear-turno.
 func esTipoSolicitud(tipo string) bool {
 	_, ok := definicionesPorTipo[tipo]
 	return ok
@@ -87,6 +89,7 @@ func tiposDeServicio() []string {
 	sort.Strings(tipos)
 	return tipos
 }
+
 type Adherente struct {
 	Dni        string `json:"dni"`
 	Nombre     string `json:"nombre"`

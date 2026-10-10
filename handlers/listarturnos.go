@@ -1,12 +1,10 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -375,18 +373,17 @@ func AsignarMedico(
 
 		if socioEmail != "" {
 
-			err := enviarEmailTurnoAsignado(
-				false,
-				socioEmail,
-				beneficiarioNombre,
-				especialidad,
-				"Dr.",
-				medicoNombre,
-				medicoApellido,
-				medicoDireccion,
-				fechaFinal,
-				horaFinal,
-			)
+			err := enviarEmailSolicitud(datosMailSolicitud{
+				Estado:       "asignado",
+				Destinatario: socioEmail,
+				Beneficiario: beneficiarioNombre,
+				Tipo:         "consulta",
+				Concepto:     especialidad,
+				Profesional:  strings.TrimSpace("Dr. " + medicoNombre + " " + medicoApellido),
+				Direccion:    medicoDireccion,
+				Fecha:        fechaFinal,
+				Hora:         horaFinal,
+			})
 
 			if err != nil {
 				log.Printf(
@@ -428,150 +425,3 @@ func AsignarMedico(
 	}
 }
 
-
-func enviarEmailTurnoAsignado(
-	esEstudio bool,
-	destinatario string,
-	nombre string,
-	especialidad string,
-	profesionalTitulo string,
-	profesionalNombre string,
-	profesionalApellido string,
-	profesionalDireccion string,
-	fecha string,
-	hora string,
-) error {
-
-	palabra := "turno"
-	if esEstudio {
-		palabra = "estudio"
-	}
-
-	profesional := strings.TrimSpace(profesionalTitulo + " " + profesionalNombre + " " + profesionalApellido)
-
-	html := fmt.Sprintf(`
-		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
-
-			<h2 style="color:#0F1E3D;">
-				Tu %s fue asignado ✅
-			</h2>
-
-			<p>
-				Hola %s,
-			</p>
-
-			<p>
-				Tu solicitud de %s fue asignada correctamente.
-			</p>
-
-			<div style="
-				background:#F8F5EF;
-				padding:20px;
-				border-radius:16px;
-				margin:20px 0;
-			">
-
-				<p>
-					<strong>Especialidad:</strong><br>
-					%s
-				</p>
-
-				<p>
-					<strong>Profesional:</strong><br>
-					%s
-				</p>
-
-				<p>
-					<strong>Fecha:</strong><br>
-					%s
-				</p>
-
-				<p>
-					<strong>Hora:</strong><br>
-					%s
-				</p>
-
-				<p>
-					<strong>Dirección:</strong><br>
-					%s
-				</p>
-
-			</div>
-
-			<p>
-				Podés consultar los detalles de tu %s
-				desde Auren.
-			</p>
-
-		</div>
-	`,
-		strings.ToUpper(palabra),
-		nombre,
-		palabra,
-		especialidad,
-		profesional,
-		fecha,
-		hora,
-		profesionalDireccion,
-		palabra,
-	)
-
-	payload := map[string]interface{}{
-		"from": "Auren <admin@formulariosalud.com.ar>",
-		"to": []string{
-			destinatario,
-		},
-		"subject": fmt.Sprintf("Tu %s fue asignado - Auren", palabra),
-		"html":    html,
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(
-		"POST",
-		"https://api.resend.com/emails",
-		bytes.NewBuffer(jsonData),
-	)
-
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set(
-		"Authorization",
-		"Bearer "+RESEND_API_KEY,
-	)
-
-	req.Header.Set(
-		"Content-Type",
-		"application/json",
-	)
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode >= 300 {
-		log.Printf("enviarEmailTurno: Resend devolvio status %d", resp.StatusCode)
-		return fmt.Errorf(
-			"resend devolvió status %d: %s",
-			resp.StatusCode,
-			string(body),
-		)
-	}
-
-	return nil
-}

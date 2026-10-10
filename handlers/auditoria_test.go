@@ -35,6 +35,9 @@ func TestAccionesAuditadasEnAllowlist(t *testing.T) {
 		AccionPermisoRevocar,
 		AccionPermisoCrearAdmin,
 		AccionTerminosPublicar,
+		AccionOpticaOrtopediaCrear,
+		AccionOpticaOrtopediaEditar,
+		AccionOpticaOrtopediaBorrar,
 	}
 
 	for _, accion := range usadas {
