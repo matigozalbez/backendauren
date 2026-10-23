@@ -38,6 +38,10 @@ func TestAccionesAuditadasEnAllowlist(t *testing.T) {
 		AccionOpticaOrtopediaCrear,
 		AccionOpticaOrtopediaEditar,
 		AccionOpticaOrtopediaBorrar,
+		AccionCocheriaCrear,
+		AccionCocheriaEditar,
+		AccionCocheriaBorrar,
+		AccionCocheriaImportar,
 	}
 
 	for _, accion := range usadas {

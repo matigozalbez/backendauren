@@ -25,12 +25,12 @@ type datosMailSolicitud struct {
 	// Se usa para el saludo.
 	Beneficiario string
 
-	// Tipo es el tipo de solicitud: consulta, estudio, grua, sepelios,
-	// domicilio u opticaortopedia.
+	// Tipo es el tipo de solicitud: consulta, estudio, grua, domicilio u
+	// opticaortopedia.
 	Tipo string
 
 	// Concepto es la especialidad (turnos y estudios) o el tipo de servicio
-	// elegido (grúa, sepelios). Para médico a domicilio viene vacío.
+	// elegido (grúa, óptica/ortopedia). Para médico a domicilio viene vacío.
 	Concepto string
 
 	// Profesional es el médico o la clínica. Vacío para los servicios.
@@ -100,7 +100,7 @@ func etiquetaConcepto(tipo string) string {
 	switch tipo {
 	case "consulta", "estudio":
 		return "Especialidad"
-	case "grua", "sepelios", "opticaortopedia":
+	case "grua", "opticaortopedia":
 		return "Tipo de servicio"
 	default:
 		return "Detalle"

@@ -44,7 +44,7 @@ var franjasPreferidasValidas = map[string]bool{
 // cupoMensualPorTipo dice cuántas solicitudes por mes calendario acepta cada
 // tipo. Es el número a tocar si cambia la política de un servicio.
 //
-// Las solicitudes con tipo grua/sepelios/domicilio se crean desde
+// Las solicitudes con tipo grua/domicilio/opticaortopedia se crean desde
 // /api/servicios/<tipo> (handlers/servicios.go), no desde /api/crear-turno,
 // pero el cupo se cuenta contra la misma tabla "turnos", así que el conteo es
 // compartido.
@@ -52,7 +52,6 @@ var cupoMensualPorTipo = map[string]int{
 	"consulta":        1,
 	"estudio":         1,
 	"grua":            1,
-	"sepelios":        1,
 	"domicilio":       1,
 	"opticaortopedia": 1,
 }
@@ -62,13 +61,12 @@ var etiquetaPorTipo = map[string]string{
 	"consulta":        "turno",
 	"estudio":         "estudio",
 	"grua":            "grúa",
-	"sepelios":        "servicio sepelial",
 	"domicilio":       "médico a domicilio",
 	"opticaortopedia": "óptica y ortopedia",
 }
 
 // esTipoSolicitud dice si el tipo corresponde a un servicio con solicitud
-// (grúa, sepelios, médico a domicilio, óptica y ortopedia). Esos servicios
+// (grúa, médico a domicilio, óptica y ortopedia). Esos servicios
 // tienen su propio endpoint de alta y su propio gate de plan, así que no
 // entran por /api/crear-turno.
 func esTipoSolicitud(tipo string) bool {
@@ -77,7 +75,7 @@ func esTipoSolicitud(tipo string) bool {
 }
 
 // tiposDeServicio devuelve los tipos que se gestionan en el panel de servicios
-// (grúa, sepelios y médico a domicilio), ordenados para que las queries sean
+// (grúa, médico a domicilio y óptica/ortopedia), ordenados para que las queries sean
 // estables. Se usa para:
 //   - listarlos en /api/admin/servicios
 //   - excluirlos de /api/admin/listar-turnos, que es solo de turnos y estudios
@@ -125,7 +123,7 @@ func CrearTurno(authClient *auth.Client) http.HandlerFunc {
 			input.Tipo = "consulta"
 		}
 
-		// Los servicios con solicitud (grúa, sepelios, médico a domicilio) no
+		// Los servicios con solicitud (grúa, médico a domicilio y óptica/ortopedia) no
 		// entran por acá: cada uno tiene su endpoint y su propio gate de plan.
 		// Solo pasan por /api/crear-turno los turnos de consulta y estudio.
 		if esTipoSolicitud(input.Tipo) {

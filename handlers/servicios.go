@@ -2,7 +2,7 @@ package handlers
 
 // handlers/servicios.go
 //
-// Servicios con solicitud: grúa, sepelios, médico a domicilio y óptica/ortopedia.
+// Servicios con solicitud: grúa, médico a domicilio y óptica/ortopedia.
 //
 // Los tres se guardan en la MISMA tabla "turnos" que los turnos y estudios
 // médicos, distinguished por la columna "tipo". Reutilizar la tabla es a
@@ -32,7 +32,6 @@ import (
 // (planColumnas) y con lo que carga el panel admin, porque la comparación es
 // por igualdad (con trim + sin distinguir mayúsculas).
 const (
-	nombrePlanSepelio = "Auren Sepelio +"
 	nombrePlanRutaMas = "Auren en Ruta +"
 )
 
@@ -46,7 +45,6 @@ type definicionServicio struct {
 	Etiqueta string
 
 	// Planes son los planes que el socio necesita, TODOS en estado activo.
-	// Un plan solo (Auren Salud) o dos (Auren Salud + Auren Sepelio +).
 	Planes []string
 
 	// OpcionesEspecialidad son las opciones del primer select del form.
@@ -78,17 +76,6 @@ var (
 		CopiaPush:            "Tu solicitud de grúa fue procesada.",
 	}
 
-	ServicioSepelios = definicionServicio{
-		Tipo:                 "sepelios",
-		Etiqueta:             "servicio sepelial",
-		Planes:               []string{nombrePlanSalud, nombrePlanSepelio},
-		EtiquetaEspecialidad: "Tipo de servicio",
-		CopiaEspecialidad:    "Contanos qué servicio necesitás.",
-		OpcionesEspecialidad: []string{"Traslado", "Velatorio", "Sepultura", "Cremación"},
-		IconoPush:            "🕊️",
-		CopiaPush:            "Tu solicitud de servicio sepelial fue procesada.",
-	}
-
 	ServicioMedicoDomicilio = definicionServicio{
 		Tipo:                 "domicilio",
 		Etiqueta:             "médico a domicilio",
@@ -116,7 +103,6 @@ var (
 // genéricos (listar, cambiar estado) puedan resolverlo desde un query param.
 var definicionesPorTipo = map[string]definicionServicio{
 	ServicioGrua.Tipo:            ServicioGrua,
-	ServicioSepelios.Tipo:        ServicioSepelios,
 	ServicioMedicoDomicilio.Tipo: ServicioMedicoDomicilio,
 	ServicioOpticaOrtopedia.Tipo: ServicioOpticaOrtopedia,
 }
@@ -148,9 +134,8 @@ type AccesoServicio struct {
 // El socio tiene que estar activo, y encima tener en estado activo TODOS los
 // planes que el servicio requiere. Ejemplos:
 //
-//   - grúa      -> "Auren en Ruta +"                (1 plan)
-//   - sepelios  -> "Auren Salud" + "Auren Sepelio +" (2 planes)
-//   - domicilio -> "Auren Salud"                    (1 plan)
+//   - grúa      -> "Auren en Ruta +" (1 plan)
+//   - domicilio -> "Auren Salud"     (1 plan)
 func evaluarAccesoServicio(data map[string]interface{}, def definicionServicio) *AccesoServicio {
 	acceso := &AccesoServicio{
 		SocioActivo:   true,
@@ -237,8 +222,9 @@ func responderSinAccesoServicio(w http.ResponseWriter, acceso *AccesoServicio, d
 // que el de los turnos, menos el modo de búsqueda por profesional: estos
 // servicios siempre son "cerca mío".
 type SolicitudServicioInput struct {
-	// Para grúa y sepelios: el tipo de servicio elegido de un select.
-	// Para médico a domicilio queda vacío.
+	// Para grúa: el tipo de servicio elegido de un select.
+	// Para médico a domicilio y óptica/ortopedia sigue el criterio de cada
+	// definición.
 	Concepto string `json:"concepto"`
 
 	Ciudad    string `json:"ciudad"`
@@ -259,11 +245,6 @@ func CrearSolicitudGrua(authClient *auth.Client) http.HandlerFunc {
 	return crearSolicitud(authClient, ServicioGrua)
 }
 
-// CrearSolicitudSepelios requiere "Auren Salud" + "Auren Sepelio +".
-func CrearSolicitudSepelios(authClient *auth.Client) http.HandlerFunc {
-	return crearSolicitud(authClient, ServicioSepelios)
-}
-
 // CrearSolicitudMedicoDomicilio requiere "Auren Salud". No pide tipo de
 // servicio, solo lugar y motivo.
 func CrearSolicitudMedicoDomicilio(authClient *auth.Client) http.HandlerFunc {
@@ -276,7 +257,7 @@ func CrearSolicitudOpticaOrtopedia(authClient *auth.Client) http.HandlerFunc {
 	return crearSolicitud(authClient, ServicioOpticaOrtopedia)
 }
 
-// crearSolicitud es el handler único de los tres servicios. Lo que cambia entre
+// crearSolicitud es el handler único de los servicios. Lo que cambia entre
 // uno y otro es la definición (plan requerido, tipo de servicio, cupo).
 func crearSolicitud(authClient *auth.Client, def definicionServicio) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -479,7 +460,7 @@ func contiene(lista []string, valor string) bool {
 // (TurnoAdminView), así el panel puede reusar los tipos y los cards.
 // RequireAdmin (se aplica como middleware en main.go).
 //
-// ?tipo=grua|sepelios|domicilio   obligatorio
+// ?tipo=grua|domicilio|opticaortopedia   opcional
 // ?estado=<estado>                opcional
 func ListarSolicitudesServicio() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

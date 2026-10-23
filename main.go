@@ -416,6 +416,60 @@ func main() {
 		middleware.RequireOperador(handlers.ListarOpticasOrtopedias())(w, r)
 	})
 
+	mux.HandleFunc("/api/cocherias", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.ListarCocherias(firebase.AuthClient)(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cocherias", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.ListarCocheriasAdmin())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cocherias/crear", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.CrearCocheria())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cocherias/editar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.EditarCocheria())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cocherias/borrar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.BorrarCocheria())(w, r)
+	})
+
+	mux.HandleFunc("/api/admin/cocherias/importar", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		middleware.RequireOperador(handlers.ImportarCocherias())(w, r)
+	})
+
 	mux.HandleFunc("/api/crear-turno", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 
@@ -528,16 +582,14 @@ func main() {
 	})
 
 	// ------------------------------------------------------------------
-	// Servicios con solicitud: grúa, sepelios, médico a domicilio y óptica
-	// y ortopedia.
+	// Servicios con solicitud: grúa, médico a domicilio y óptica y ortopedia.
 	//
 	// Se guardan en la misma tabla "turnos" que los turnos y estudios, con
-	// tipo = 'grua' | 'sepelios' | 'domicilio' | 'opticaortopedia'. Cada uno
-	// tiene su propio endpoint de alta porque cada uno exige un plan distinto:
+	// tipo = 'grua' | 'domicilio' | 'opticaortopedia'. Cada uno tiene su
+	// propio endpoint de alta porque cada uno exige un plan distinto:
 	//
-	//   grúa            -> "Auren en Ruta +"
-	//   sepelios        -> "Auren Salud" + "Auren Sepelio +"
-	//   domicilio       -> "Auren Salud"
+	//   grúa             -> "Auren en Ruta +"
+	//   domicilio        -> "Auren Salud"
 	//   óptica/ortopedia -> "Auren Salud"
 	//
 	// "Seguro de vida" no aparece acá: por ahora es solo una tarjeta en la app,
@@ -551,15 +603,6 @@ func main() {
 			return
 		}
 		handlers.CrearSolicitudGrua(firebase.AuthClient)(w, r)
-	})
-
-	mux.HandleFunc("/api/servicios/sepelios", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w, r)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		handlers.CrearSolicitudSepelios(firebase.AuthClient)(w, r)
 	})
 
 	mux.HandleFunc("/api/servicios/domicilio", func(w http.ResponseWriter, r *http.Request) {

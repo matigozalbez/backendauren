@@ -39,8 +39,6 @@ func etiquetaTipo(canal, tipo string) string {
 		switch t {
 		case "grua", "grúa":
 			return "grúa"
-		case "sepelios":
-			return "servicio sepelial"
 		case "domicilio":
 			return "visita a domicilio"
 		}

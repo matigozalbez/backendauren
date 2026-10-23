@@ -42,6 +42,10 @@ const (
 	AccionOpticaOrtopediaCrear  = "optica_ortopedia.crear"
 	AccionOpticaOrtopediaEditar = "optica_ortopedia.editar"
 	AccionOpticaOrtopediaBorrar = "optica_ortopedia.borrar"
+	AccionCocheriaCrear         = "cocheria.crear"
+	AccionCocheriaEditar        = "cocheria.editar"
+	AccionCocheriaBorrar        = "cocheria.borrar"
+	AccionCocheriaImportar      = "cocheria.importar"
 )
 
 var accionesAuditadas = map[string]struct{}{
@@ -71,6 +75,10 @@ var accionesAuditadas = map[string]struct{}{
 	AccionOpticaOrtopediaCrear:  {},
 	AccionOpticaOrtopediaEditar: {},
 	AccionOpticaOrtopediaBorrar: {},
+	AccionCocheriaCrear:         {},
+	AccionCocheriaEditar:        {},
+	AccionCocheriaBorrar:        {},
+	AccionCocheriaImportar:      {},
 }
 
 // EventoAuditoria es un registro ya persistido, en la forma en que la

@@ -59,7 +59,7 @@ func ListarTurnos() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Los servicios con solicitud (grúa, sepelios, médico a domicilio) se
+		// Los servicios con solicitud (grúa, médico a domicilio y óptica/ortopedia) se
 		// gestionan en el panel de servicios (/panelservicios), no acá. Antes
 		// de que existiera ese panel se colaban en esta lista porque la query
 		// no filtraba por tipo, y el panel llegaba a ofrecerles "asignar
@@ -312,7 +312,6 @@ func AsignarMedico(
 			)
 		}
 
-		
 		if uid != "" && msgClient != nil {
 
 			var token string
@@ -328,44 +327,44 @@ func AsignarMedico(
 				)
 			} else if token != "" {
 
-					push := &messaging.Message{
-						Token: token,
+				push := &messaging.Message{
+					Token: token,
 
-						Webpush: &messaging.WebpushConfig{
-							Notification: &messaging.WebpushNotification{
-								Title: "Turno asignado ✅",
-								Body: fmt.Sprintf(
-									"Tu turno de %s fue asignado para el %s a las %s.",
-									especialidad,
-									fechaFinal,
-									horaFinal,
-								),
-								Icon: "/icon-192.png",
-							},
+					Webpush: &messaging.WebpushConfig{
+						Notification: &messaging.WebpushNotification{
+							Title: "Turno asignado ✅",
+							Body: fmt.Sprintf(
+								"Tu turno de %s fue asignado para el %s a las %s.",
+								especialidad,
+								fechaFinal,
+								horaFinal,
+							),
+							Icon: "/icon-192.png",
 						},
-					}
+					},
+				}
 
-					_, err := msgClient.Send(ctx, push)
+				_, err := msgClient.Send(ctx, push)
 
-					if err != nil {
-						log.Printf(
-							"ERROR enviando push al uid=%s: %v",
-							uid,
-							err,
-						)
-					} else {
-						log.Printf(
-							"PUSH enviado correctamente al uid=%s",
-							uid,
-						)
-					}
+				if err != nil {
+					log.Printf(
+						"ERROR enviando push al uid=%s: %v",
+						uid,
+						err,
+					)
 				} else {
 					log.Printf(
-						"WARNING: push_tokens/%s no tiene token",
+						"PUSH enviado correctamente al uid=%s",
 						uid,
 					)
 				}
+			} else {
+				log.Printf(
+					"WARNING: push_tokens/%s no tiene token",
+					uid,
+				)
 			}
+		}
 
 		// =========================================================
 		// 5. EMAIL CON RESEND
@@ -424,4 +423,3 @@ func AsignarMedico(
 		})
 	}
 }
-

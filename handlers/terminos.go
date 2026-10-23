@@ -381,7 +381,7 @@ func responderTerminosPendientes(w http.ResponseWriter) {
 }
 
 // gateTerminosServicios aborta la creación de turnos, estudios y solicitudes
-// (grúa, sepelios, médico a domicilio) cuando el socio no tiene aceptada la
+// (grúa, médico a domicilio y óptica/ortopedia) cuando el socio no tiene aceptada la
 // versión vigente de los T&C. Devuelve true si se puede seguir, false si ya
 // respondió (403 de términos o error interno). Se evalúa con el DNI que el
 // backend ya resolvió del uid, nunca con datos del body.
