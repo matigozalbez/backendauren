@@ -18,11 +18,11 @@ const maxImagenEstudioBytes = 5 * 1024 * 1024 // 5 MB
 
 // Estados permitidos para un estudio en el panel admin.
 var estadosEstudioValidos = map[string]bool{
-	"pendiente":   true,
-	"en_proceso":  true,
-	"aprobado":    true,
-	"rechazado":   true,
-	"cancelado":   true,
+	"pendiente":  true,
+	"en_proceso": true,
+	"aprobado":   true,
+	"rechazado":  true,
+	"cancelado":  true,
 }
 
 // SubirImagenEstudio sube una foto tomada por el socio a Cloudinary y devuelve
@@ -81,7 +81,7 @@ func SubirImagenEstudio(authClient *auth.Client) http.HandlerFunc {
 			return
 		}
 
-		url, err := SubirACloudinary(uid, contentType, contenido)
+		url, err := SubirACloudinary(uid, "auren_estudios", contentType, contenido)
 		if err != nil {
 			log.Printf("ERROR subiendo imagen a Cloudinary para uid=%s: %v", uid, err)
 			http.Error(w, "error subiendo la imagen, intentalo de nuevo", http.StatusInternalServerError)

@@ -623,6 +623,15 @@ func main() {
 		handlers.CrearSolicitudOpticaOrtopedia(firebase.AuthClient)(w, r)
 	})
 
+	mux.HandleFunc("/api/servicios/subir-imagen", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handlers.SubirImagenServicio(firebase.AuthClient)(w, r)
+	})
+
 	mux.HandleFunc("/api/servicios/cancelar", func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w, r)
 		if r.Method == http.MethodOptions {

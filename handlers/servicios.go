@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -32,7 +33,8 @@ import (
 // (planColumnas) y con lo que carga el panel admin, porque la comparación es
 // por igualdad (con trim + sin distinguir mayúsculas).
 const (
-	nombrePlanRutaMas = "Auren en Ruta +"
+	nombrePlanRutaMas      = "Auren en Ruta +"
+	maxImagenServicioBytes = 5 * 1024 * 1024
 )
 
 // definicionServicio describe un servicio con solicitud: qué plan lo habilita,
@@ -56,6 +58,8 @@ type definicionServicio struct {
 
 	// CopiaEspecialidad es el texto de ayuda del select.
 	CopiaEspecialidad string
+
+	RequiereImagen bool
 
 	// IconoPush y CopiaPush arman el cuerpo de la notificación.
 	IconoPush string
@@ -94,6 +98,7 @@ var (
 		EtiquetaEspecialidad: "Seleccioná una opción",
 		CopiaEspecialidad:    "Elegí si necesitás óptica u ortopedia.",
 		OpcionesEspecialidad: []string{"Óptica", "Ortopedia"},
+		RequiereImagen:       true,
 		IconoPush:            "👓",
 		CopiaPush:            "Tu solicitud de óptica y ortopedia fue procesada.",
 	}
@@ -231,6 +236,8 @@ type SolicitudServicioInput struct {
 	Direccion string `json:"direccion"`
 	Motivo    string `json:"motivo"`
 
+	ImagenURL string `json:"imagenUrl"`
+
 	// Sin franja horaria: estos servicios son de respuesta rápida y no tiene
 	// sentido que el socio reserve mañana/tarde/noche. La columna
 	// franja_preferida de la tabla sigue existiendo y se escribe vacía; turnos
@@ -284,6 +291,7 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 		input.Ciudad = strings.TrimSpace(input.Ciudad)
 		input.Direccion = strings.TrimSpace(input.Direccion)
 		input.Motivo = strings.TrimSpace(input.Motivo)
+		input.ImagenURL = strings.TrimSpace(input.ImagenURL)
 		input.AdherenteDni = strings.TrimSpace(input.AdherenteDni)
 
 		// Si el servicio define opciones de tipo de servicio, tiene que venir
@@ -296,6 +304,20 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 			}
 		} else {
 			input.Concepto = ""
+		}
+
+		if def.RequiereImagen {
+			if input.ImagenURL == "" {
+				http.Error(w, "falta la foto de la orden médica", http.StatusBadRequest)
+				return
+			}
+			if !strings.HasPrefix(input.ImagenURL, "https://res.cloudinary.com/") ||
+				!strings.Contains(input.ImagenURL, "/auren_servicios/"+uid+"/") {
+				http.Error(w, "la imagen no corresponde a una subida válida", http.StatusBadRequest)
+				return
+			}
+		} else {
+			input.ImagenURL = ""
 		}
 
 		// Estos servicios siempre se resuelven en el lugar del socio, así que
@@ -394,7 +416,7 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 				es_para_adherente, beneficiario_dni, beneficiario_nombre,
 				especialidad, ciudad, direccion, lat, lng, motivo, modo,
 				nombre_profesional_sugerido, tipo, imagen_url, franja_preferida, estado
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'geolocalizado','',$14,'','','pendiente')
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'geolocalizado','',$14,$15,'','pendiente')
 			RETURNING id::text`,
 			uid,
 			socio.DNI,
@@ -410,6 +432,7 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 			longitud,
 			input.Motivo,
 			def.Tipo,
+			input.ImagenURL,
 		).Scan(&solicitudID)
 
 		if err != nil {
@@ -437,6 +460,74 @@ func crearSolicitud(authClient *auth.Client, def definicionServicio) http.Handle
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
 			"id":     solicitudID,
+		})
+	}
+}
+
+func SubirImagenServicio(authClient *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if CLOUDINARY_CLOUD_NAME == "" || CLOUDINARY_API_KEY == "" || CLOUDINARY_API_SECRET == "" {
+			log.Println("ERROR: credenciales Cloudinary ausentes")
+			http.Error(w, "subida de imágenes no configurada", http.StatusInternalServerError)
+			return
+		}
+
+		uid, err := verifyIDToken(r, authClient)
+		if err != nil {
+			http.Error(w, "no autorizado, iniciá sesión", http.StatusUnauthorized)
+			return
+		}
+
+		if !gateTerminosServiciosUID(context.Background(), w, uid) {
+			return
+		}
+
+		if err := r.ParseMultipartForm(maxImagenServicioBytes + (1 << 20)); err != nil {
+			http.Error(w, "imagen demasiado grande o multipart inválido", http.StatusBadRequest)
+			return
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "falta el archivo de imagen (campo 'file')", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		if header.Size > maxImagenServicioBytes {
+			http.Error(w, "la imagen supera los 5 MB", http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		contentType := header.Header.Get("Content-Type")
+		if contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
+			http.Error(w, "solo se admiten imágenes PNG, JPG o WebP", http.StatusBadRequest)
+			return
+		}
+
+		contenido, err := io.ReadAll(file)
+		if err != nil || len(contenido) == 0 {
+			http.Error(w, "error leyendo la imagen", http.StatusBadRequest)
+			return
+		}
+
+		url, err := SubirACloudinary(uid, "auren_servicios", contentType, contenido)
+		if err != nil {
+			log.Printf("ERROR subiendo imagen de servicio a Cloudinary para uid=%s: %v", uid, err)
+			http.Error(w, "error subiendo la imagen, intentalo de nuevo", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+			"url":    url,
 		})
 	}
 }

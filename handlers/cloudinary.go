@@ -32,13 +32,13 @@ func InicializarCloudinary() {
 }
 
 // SubirACloudinary sube una imagen a Cloudinary con firma SHA1 (API server-side)
-// guardándola en la carpeta auren_estudios/<uid>. Devuelve la URL pública.
-func SubirACloudinary(uid, contentType string, contenido []byte) (string, error) {
+// guardándola en la carpeta carpetaBase/<uid>. Devuelve la URL pública.
+func SubirACloudinary(uid, carpetaBase, contentType string, contenido []byte) (string, error) {
 	if CLOUDINARY_CLOUD_NAME == "" || CLOUDINARY_API_KEY == "" || CLOUDINARY_API_SECRET == "" {
 		return "", fmt.Errorf("credenciales Cloudinary ausentes")
 	}
 
-	carpeta := "auren_estudios/" + uid
+	carpeta := carpetaBase + "/" + uid
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
 	// Firma SHA1 de los parámetros ordenados alfabéticamente + API secret.
